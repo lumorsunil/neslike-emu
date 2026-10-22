@@ -1,0 +1,9 @@
+.envrc
+.direnv
+
+.zig-cache
+zig-pkg
+zig-out
+
+dasm.exe
+*.bin
