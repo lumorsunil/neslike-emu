@@ -11,6 +11,7 @@ const Startup = @import("startup.zig").Startup;
 const Graphics = @import("graphics.zig").Graphics;
 const Audio = @import("audio.zig").Audio;
 const Drive = @import("drive.zig").Drive;
+const Randomizer = @import("randomizer.zig").Randomizer;
 const Debug = @import("debug.zig").Debug;
 const MemoryMap = @import("memory-map.zig").MemoryMap;
 const UI = @import("ui.zig");
@@ -38,8 +39,8 @@ const tile2 = [16]u8{
 };
 
 pub fn main(init: std.process.Init) !void {
-    var ctx = try initEmu(init.io, init.gpa);
-    ctx.computer.modules.get(Debug).chip.cpu = &ctx.computer.cpu;
+    var ctx: MainContext = undefined;
+    try initEmu(init.io, init.gpa, &ctx);
     defer deinitEmu(init.gpa, &ctx);
 
     while (!rl.windowShouldClose()) {
@@ -47,8 +48,8 @@ pub fn main(init: std.process.Init) !void {
     }
 }
 
-fn initEmu(io: std.Io, allocator: Allocator) !MainContext {
-    var ctx = MainContext{
+fn initEmu(io: std.Io, allocator: Allocator, ctx: *MainContext) !void {
+    ctx.* = MainContext{
         .random = std.Random.IoSource{ .io = io },
         .file = try std.Io.Dir.cwd().readFileAlloc(io, "test.bin", allocator, .unlimited),
     };
@@ -57,19 +58,20 @@ fn initEmu(io: std.Io, allocator: Allocator) !MainContext {
     rl.initAudioDevice();
     rl.setWindowFocused();
     rl.setWindowPosition(24, 24);
-    rl.setTargetFPS(60);
+    // rl.setTargetFPS(60 * 2);
 
-    initStartupChip(&ctx);
-    initMemoryChip(&ctx);
-    initDriveChip(&ctx);
-    try initGraphicsChip(&ctx);
-    try initMemoryRenderBuffers(&ctx);
-    try initTextures(&ctx);
-    try initAudio(&ctx);
+    initStartupChip(ctx);
+    initMemoryChip(ctx);
+    initDriveChip(ctx);
+    initRandomizerChip(ctx);
+    try initGraphicsChip(ctx);
+    try initMemoryRenderBuffers(ctx);
+    try initTextures(ctx);
+    try initAudio(ctx);
 
-    drawMemoryRenderBufferBackgrounds(&ctx);
+    ctx.computer.modules.get(Debug).chip.cpu = &ctx.computer.cpu;
 
-    return ctx;
+    drawMemoryRenderBufferBackgrounds(ctx);
 }
 
 fn deinitEmu(allocator: Allocator, ctx: *MainContext) void {
@@ -93,6 +95,10 @@ fn initDriveChip(ctx: *MainContext) void {
     }
 }
 
+fn initRandomizerChip(ctx: *MainContext) void {
+    ctx.computer.modules.get(Randomizer).chip.random = .init(ctx.random.interface().int(u64));
+}
+
 fn initGraphicsChip(ctx: *MainContext) !void {
     const graphics = ctx.computer.modules.get(Graphics);
 
@@ -100,19 +106,19 @@ fn initGraphicsChip(ctx: *MainContext) !void {
     graphics.chip.background_layer_buffer = try rl.loadRenderTexture(256, 256);
 
     ctx.random.interface().bytes(&graphics.chip.memory);
-    for (graphics.chip.tileData()[0..16], 0..) |*b, i| {
-        b.* = tile[i % 16];
-    }
-    for (graphics.chip.tileData()[16..32], 0..) |*b, i| {
-        b.* = tile2[i % 16];
-    }
-    for (graphics.chip.tilePaletteMap()) |*b| {
-        b.* = 0;
-    }
-    for (0..graphics.chip.tileMap().len) |i| {
-        const data: u8 = if (i < graphics.chip.tileMap().len / 2) 0 else 1;
-        try graphics.chip.write(@truncate(i), data);
-    }
+    // for (graphics.chip.tileData()[0..16], 0..) |*b, i| {
+    //     b.* = tile[i % 16];
+    // }
+    // for (graphics.chip.tileData()[16..32], 0..) |*b, i| {
+    //     b.* = tile2[i % 16];
+    // }
+    // for (graphics.chip.tilePaletteMap()) |*b| {
+    //     b.* = 0;
+    // }
+    // for (0..graphics.chip.tileMap().len) |i| {
+    //     const data: u8 = if (i < graphics.chip.tileMap().len / 2) 0 else 1;
+    //     try graphics.chip.write(@truncate(i), data);
+    // }
 }
 
 fn initTextures(ctx: *MainContext) !void {
@@ -145,13 +151,15 @@ fn initTextures(ctx: *MainContext) !void {
 
 fn initAudio(ctx: *MainContext) !void {
     const audio = ctx.computer.modules.get(Audio);
-    rl.setAudioStreamBufferSizeDefault(Audio.audio_buffer_size);
+    // rl.setAudioStreamBufferSizeDefault(Audio.audio_buffer_size);
     audio.chip.audio_stream = try rl.loadAudioStream(Audio.sample_rate, 32, 1);
+    Audio.self_ = &audio.chip;
+    rl.setAudioStreamCallback(audio.chip.audio_stream, Audio.audioStreamCallback);
+    // rl.attachAudioStreamProcessor(audio.chip.audio_stream, Audio.audioStreamCallback);
     audio.chip.initMemory();
-    // audio.chip.random = ctx.random.interface();
     ctx.random.interface().bytes(&audio.chip.noise_lut);
     rl.playAudioStream(audio.chip.audio_stream);
-    rl.setMasterVolume(1);
+    rl.setMasterVolume(0.5);
 }
 
 fn initMemoryRenderBuffers(ctx: *MainContext) !void {
@@ -197,6 +205,42 @@ const MainContext = struct {
     random: std.Random.IoSource,
     computer: Computer = .{},
 
+    frame_count: usize = 0,
+    time: struct {
+        current: f64 = 0,
+        previous: f64 = 0,
+        draw: f64 = 0,
+        update: f64 = 0,
+        target: f64 = 1.0 / 60.0,
+        frame: f64 = 0,
+
+        fn begin(self: *@This()) void {
+            self.current = rl.getTime(); // Number of elapsed seconds since InitTimer()
+            self.update = self.current - self.previous;
+            self.previous = self.current;
+        }
+
+        fn end(self: *@This()) void {
+            // Frame time control system
+            self.current = rl.getTime();
+            self.draw = self.current - self.previous;
+            self.previous = self.current;
+
+            self.frame = self.update + self.draw;
+
+            // Wait for some milliseconds...
+            if (self.frame < self.target) {
+                rl.waitTime(self.target - self.frame);
+
+                self.current = rl.getTime();
+                const wait_time: f64 = self.current - self.previous;
+                self.previous = self.current;
+
+                self.frame += wait_time; // Total frame time: update + draw + wait
+            }
+        }
+    } = .{},
+
     textures: Textures = undefined,
 
     memory_render_buffer: rl.RenderTexture2D = undefined,
@@ -221,6 +265,15 @@ const MainContext = struct {
 };
 
 fn loop(ctx: *MainContext) !void {
+    ctx.time.begin();
+    defer ctx.time.end();
+    // defer ctx.frame_count +%= 1;
+
+    // if (ctx.frame_count % 3 != 0) {
+    //     try updateAudio(ctx);
+    //     return;
+    // }
+
     try updateEmuControls(ctx);
     updateMemoryRenderBuffers(ctx);
 
@@ -237,6 +290,11 @@ fn loop(ctx: *MainContext) !void {
     rl.drawFPS(5, UI.screen_size[1] - 20);
 
     rl.endDrawing();
+}
+
+fn updateAudio(ctx: *MainContext) !void {
+    _ = ctx;
+    // try ctx.computer.modules.get(Audio).chip.stepFrame();
 }
 
 fn updateEmuControls(ctx: *MainContext) !void {

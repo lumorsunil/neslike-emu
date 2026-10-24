@@ -1,0 +1,44 @@
+    processor 6502
+    org $D000
+
+    include "notes.inc"
+    include "neslike.inc"
+
+main:
+play_sound:
+
+    ; lda #$04
+    ; sta NOISE_V
+    ; lda #$80
+    ; lda #$00
+    ; sta NOISE_M
+    ; lda #$FF
+    ; sta NOISE_F
+    ; lda #$01
+    ; sta NOISE_F+1
+    ; lda #$5a
+    ; sta NOISE_F+2
+
+frame:
+    dec counter
+    bne end
+    inc state
+    lda state
+    and #%00000001
+    tax
+    lda volume,x
+    sta NOISE_V
+    lda duration,x
+    sta counter
+end:
+    sta VSYNC
+    jmp frame
+
+volume:
+    byte 8, 0
+duration:
+    byte $01, $05
+counter:
+    byte $08
+state:
+    byte 0

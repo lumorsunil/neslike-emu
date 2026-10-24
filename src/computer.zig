@@ -6,6 +6,7 @@ const Controller = @import("controller.zig").Controller;
 const Startup = @import("startup.zig").Startup;
 const Audio = @import("audio.zig").Audio;
 const Drive = @import("drive.zig").Drive;
+const Randomizer = @import("randomizer.zig").Randomizer;
 const Debug = @import("debug.zig").Debug;
 const ModuleCollection = @import("module.zig").ModuleCollection;
 
@@ -17,6 +18,7 @@ pub const Computer = struct {
         Audio,
         Drive,
         Controller,
+        Randomizer,
         Startup,
         Debug,
     }) = .init(.{
@@ -25,6 +27,7 @@ pub const Computer = struct {
         .init(0x4000),
         .init(0xD000),
         .init(0xE000),
+        .init(0xFFFB),
         .init(0xFFFC),
         .init(0xFFFF),
     }),

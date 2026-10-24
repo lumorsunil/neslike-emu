@@ -247,11 +247,13 @@ pub const Graphics = struct {
     }
 
     fn drawSprite(self: *@This(), sprite: Sprite) void {
-        const palette = self.spritePalettes()[@as(u16, sprite.palette) * 4 .. @as(u16, sprite.palette) * 4 + 4];
+        const pw = 4;
+        const pi = @as(u16, sprite.palette);
+        const palette = self.spritePalettes()[pi * pw .. pi * pw + pw];
 
         for (0..8) |tile_data_row| {
             for (0..2) |tile_data_row_side| {
-                const data = self.tileData()[@as(u16, sprite.tile_index) * 16 + tile_data_row * 2 + tile_data_row_side];
+                const data = self.spriteData()[@as(u16, sprite.tile_index) * 16 + tile_data_row * 2 + tile_data_row_side];
 
                 for (0..4) |pixel| {
                     const palette_color: u2 = @truncate(data >> @truncate(pixel * 2));
@@ -310,12 +312,6 @@ pub const Graphics = struct {
         _: u2,
     };
 
-    const Tile = struct {
-        pixels: [8 * 8]packed struct {
-            color: u2,
-        } = undefined,
-    };
-
     pub const Error = error{};
 };
 
@@ -331,10 +327,12 @@ pub const WriteContext = struct {
 };
 
 pub fn VirtualModule(
+    comptime label_: []const u8,
     comptime memory_len_: u16,
     comptime write_: fn (WriteContext) void,
 ) type {
     return struct {
+        pub const label = label_;
         pub const Addr = std.math.IntFittingRange(0, memory_len - 1);
         pub const memory_len = memory_len_;
 
@@ -342,32 +340,32 @@ pub fn VirtualModule(
     };
 }
 
-pub fn WriterModule(comptime memory_len: u16) type {
-    return VirtualModule(memory_len, writerWrite);
+pub fn WriterModule(comptime label: []const u8, comptime memory_len: u16) type {
+    return VirtualModule(label, memory_len, writerWrite);
 }
 pub fn writerWrite(ctx: WriteContext) void {
     ctx.graphics.memory[ctx.addr] = ctx.data;
 }
 
-const TilePatternMap = VirtualModule(0x0400, tilePatternMapWrite);
+const TilePatternMap = VirtualModule("TilePatternMap", 0x0400, tilePatternMapWrite);
 pub fn tilePatternMapWrite(ctx: WriteContext) void {
     ctx.graphics.memory[ctx.addr] = ctx.data;
     ctx.graphics.queueTile(@intCast(ctx.rel_addr));
 }
 
-const TilePaletteMap = VirtualModule(0x0100, tilePaletteMapWrite);
+const TilePaletteMap = VirtualModule("TilePaletteMap", 0x0100, tilePaletteMapWrite);
 pub fn tilePaletteMapWrite(ctx: WriteContext) void {
     ctx.graphics.memory[ctx.addr] = ctx.data;
     for (0..4) |i| ctx.graphics.queueTile(@intCast(ctx.rel_addr * 4 + @as(u16, @truncate(i))));
 }
 
-const TilePaletteData = WriterModule(0x0010);
-const SpritePaletteData = WriterModule(0x0010);
-const TileData = WriterModule(0x1000);
-const SpriteData = WriterModule(0x1000);
-const SpriteMap = WriterModule(0x0100);
+const TilePaletteData = WriterModule("TilePaletteData", 0x0010);
+const SpritePaletteData = WriterModule("SpritePaletteData", 0x0010);
+const TileData = WriterModule("TileData", 0x1000);
+const SpriteData = WriterModule("SpriteData", 0x1000);
+const SpriteMap = WriterModule("SpriteMap", 0x0100);
 
-const VsyncModule = VirtualModule(1, writeVsync);
+const VsyncModule = VirtualModule("Vsync", 1, writeVsync);
 fn writeVsync(ctx: WriteContext) void {
     ctx.graphics.rdy = 0;
 }

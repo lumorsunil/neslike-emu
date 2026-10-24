@@ -9,6 +9,15 @@ pub const Audio = struct {
     filtered_sample: f32 = 0,
     noise_lut: [4096]u8 = undefined,
 
+    fn getPackedStructByteSize(comptime T: type) usize {
+        return @typeInfo(@typeInfo(T).@"struct".backing_integer.?).int.bits / 8;
+    }
+
+    const ADSR = packed struct(u8) {
+        attack: u8,
+    };
+    const adsr_size = getPackedStructByteSize(ADSR);
+
     const SquareWave = packed struct(u104) {
         duty_cycle: u8 = duty_cycle_50,
         volume: u4 = 0,
@@ -48,10 +57,10 @@ pub const Audio = struct {
             std.log.debug("setting frequency to {} from {},{},{}, phase_step: {}", .{ frequency, self.frequency.int_hi, self.frequency.int_lo, self.frequency.fraction, self.phase_step });
         }
     };
-    const square_wave_size = 13;
+    const square_wave_size = getPackedStructByteSize(SquareWave);
 
     const TriangleWave = packed struct(u104) {
-        sequence: u5 = 0,
+        sequence: u5 = sequence_start,
         _: u3 = 0,
         volume: u4 = 0,
         __: u4 = 0,
@@ -66,6 +75,8 @@ pub const Audio = struct {
             .int_hi = 0x00,
             .fraction = 0,
         },
+
+        const sequence_start: u5 = 8;
 
         fn tick(self: *align(1) @This()) f32 {
             const seq_out: f32 = @floatFromInt(if (self.sequence > 15) 31 - self.sequence else self.sequence);
@@ -88,7 +99,7 @@ pub const Audio = struct {
 
             if (prev_volume == 0 and self.volume > 0) {
                 self.phase = 0;
-                self.sequence = 0;
+                self.sequence = sequence_start;
             }
         }
 
@@ -100,10 +111,10 @@ pub const Audio = struct {
             std.log.debug("setting frequency to {} from {},{},{}, phase_step: {}", .{ frequency, self.frequency.int_hi, self.frequency.int_lo, self.frequency.fraction, self.phase_step });
         }
     };
-    const triangle_wave_size = 13;
+    const triangle_wave_size = getPackedStructByteSize(TriangleWave);
 
     const Noise = packed struct(u112) {
-        volume: u4 = 0x4,
+        volume: u4 = 0x0,
         _: u4 = 0,
         counter: u15 = 0,
         mode: u1 = 0,
@@ -142,13 +153,18 @@ pub const Audio = struct {
             std.log.debug("setting frequency to {} from {},{},{}, phase_step: {}", .{ frequency, self.frequency.int_hi, self.frequency.int_lo, self.frequency.fraction, self.phase_step });
         }
     };
-    const noise_size = 14;
+    const noise_size = getPackedStructByteSize(Noise);
 
     pub const Addr = std.math.IntFittingRange(0, memory_len - 1);
     pub const memory_len = 2 * square_wave_size + triangle_wave_size + noise_size;
 
     pub const audio_buffer_size = 735;
     pub const sample_rate = 44100.0;
+    // pub const sample_rate = 2_000_000.0;
+    var ring_buffer: [ring_buffer_size]f32 = undefined;
+    var ring_buffer_read: usize = 0;
+    var ring_buffer_write: usize = 0;
+    const ring_buffer_size = 4096;
     const alpha = 0.985;
     const duty_cycle_50: u8 = 0b11110000;
 
@@ -184,40 +200,9 @@ pub const Audio = struct {
         return std.mem.bytesAsValue(Noise, self.memory[noise_start..noise_end]);
     }
 
-    pub fn stepFrame(self: *@This()) Error!void {
-        if (rl.isAudioStreamProcessed(self.audio_stream)) {
-            var buffer: [audio_buffer_size]f32 = undefined;
-
-            const square_wave_1 = self.getSquareWave1();
-            const square_wave_2 = self.getSquareWave2();
-            const triangle_wave = self.getTriangleWave();
-            const noise = self.getNoise();
-
-            const square_wave_1_weight = 0.5;
-            const square_wave_2_weight = 0.5;
-            const triangle_wave_weight = 1.0;
-            const noise_weight = 0.5;
-
-            for (0..buffer.len) |i| {
-                const square_wave_1_out = ((square_wave_1.tick() / 15.0) * 2.0 - 1.0) * square_wave_1_weight;
-                const square_wave_2_out = ((square_wave_2.tick() / 15.0) * 2.0 - 1.0) * square_wave_2_weight;
-                const triangle_wave_out = ((triangle_wave.tick() / 15.0) * 2.0 - 1.0) * triangle_wave_weight;
-                const noise_out = ((noise.tick(self.*) / 15.0) * 2.0 - 1.0) * noise_weight;
-
-                const raw_sample = (square_wave_1_out + square_wave_2_out + triangle_wave_out + noise_out) / 4.0;
-
-                // const squares = 95.88 / ((8128.0 / (square_wave_1.tick() + square_wave_2.tick())) + 100.0);
-                // const tnd = 159.79 / ((100.0 / (triangle_wave.tick() / 8227.0 + noise.tick() / 12241.0)) + 1.0);
-
-                // const raw_sample = squares + tnd;
-                self.filtered_sample = alpha * (self.filtered_sample + raw_sample - self.prev_sample);
-                self.prev_sample = raw_sample;
-
-                buffer[i] = self.filtered_sample * 2.0;
-            }
-
-            rl.updateAudioStream(self.audio_stream, &buffer, buffer.len);
-        }
+    pub fn stepFrame(_: *@This()) Error!void {
+        const samples_to_generate: usize = @ceil(rl.getFrameTime() * sample_rate);
+        generateAudioDataToRingBuffer(samples_to_generate);
     }
 
     pub fn read(self: @This(), addr: Addr) Error!u8 {
@@ -245,6 +230,75 @@ pub const Audio = struct {
         } else if (addr >= noise_start + @offsetOf(Noise, "frequency") and addr <= noise_start + @offsetOf(Noise, "frequency") + freq_len) {
             const noise = self.getNoise();
             noise.setFrequency();
+        }
+    }
+
+    pub var self_: *@This() = undefined;
+
+    pub fn audioStreamCallback(buffer_any: ?*anyopaque, frames: c_uint) callconv(.c) void {
+        // std.log.debug("frames: {}", .{frames});
+        const buffer: [*c]f32 = @ptrCast(@alignCast(buffer_any.?));
+
+        for (0..frames) |i| {
+            if (ring_buffer_read != ring_buffer_write) {
+                ring_buffer_read += 1;
+                ring_buffer_read %= ring_buffer_size;
+                buffer[i] = ring_buffer[ring_buffer_read];
+            } else {
+                // TODO: fix this? (seems to work though)
+                buffer[i] = 0;
+                // generateAudioData(buffer[i..frames]);
+                break;
+            }
+        }
+    }
+
+    fn generateAudioDataToRingBuffer(frames: usize) void {
+        const space = if (ring_buffer_read <= ring_buffer_write) (ring_buffer_size - ring_buffer_write - 1 + ring_buffer_read) else ring_buffer_read - ring_buffer_write - 1;
+        const actual_frames = @min(frames, space);
+        ring_buffer_write += 1;
+        ring_buffer_write %= ring_buffer_size;
+        const end_len = @min(ring_buffer.len - ring_buffer_write, actual_frames);
+        const end = ring_buffer_write + end_len;
+        const ring_buffer_end = ring_buffer[ring_buffer_write..end];
+        const rest = actual_frames - end_len;
+        const ring_buffer_start = ring_buffer[0..rest];
+
+        generateAudioData(ring_buffer_end);
+        generateAudioData(ring_buffer_start);
+
+        ring_buffer_write += actual_frames - 1;
+        ring_buffer_write %= ring_buffer_size;
+    }
+
+    fn generateAudioData(buffer: []f32) void {
+        const square_wave_1 = self_.getSquareWave1();
+        const square_wave_2 = self_.getSquareWave2();
+        const triangle_wave = self_.getTriangleWave();
+        const noise = self_.getNoise();
+
+        const square_wave_1_weight = 0.5;
+        const square_wave_2_weight = 0.5;
+        const triangle_wave_weight = 1.0;
+        const noise_weight = 0.5;
+
+        for (buffer) |*b| {
+            const square_wave_1_out = ((square_wave_1.tick() / 15.0) * 2.0 - 1.0) * square_wave_1_weight;
+            const square_wave_2_out = ((square_wave_2.tick() / 15.0) * 2.0 - 1.0) * square_wave_2_weight;
+            const triangle_wave_out = ((triangle_wave.tick() / 15.0) * 2.0 - 1.0) * triangle_wave_weight;
+            const noise_out = ((noise.tick(self_.*) / 15.0) * 2.0 - 1.0) * noise_weight;
+
+            const raw_sample = (square_wave_1_out + square_wave_2_out + triangle_wave_out + noise_out) / 4.0;
+
+            // NES-stuff
+            // const squares = 95.88 / ((8128.0 / (square_wave_1.tick() + square_wave_2.tick())) + 100.0);
+            // const tnd = 159.79 / ((100.0 / (triangle_wave.tick() / 8227.0 + noise.tick() / 12241.0)) + 1.0);
+            // const raw_sample = squares + tnd;
+
+            self_.filtered_sample = alpha * (self_.filtered_sample + raw_sample - self_.prev_sample);
+            self_.prev_sample = raw_sample;
+
+            b.* = self_.filtered_sample * 2.0;
         }
     }
 

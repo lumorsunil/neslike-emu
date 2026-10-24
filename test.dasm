@@ -4,8 +4,64 @@
     include "notes.inc"
     include "neslike.inc"
 
+player_x EQU SMAP+0
+player_y EQU SMAP+1
+player_attr EQU SMAP+3
+
 main:
+    lda #$02
+    ldx #$20
+set_tiles:
+    dex
+    sta TPATM,x
+    bne set_tiles
+
+    lda #$FF
+    ldx #$08
+set_palettes:
+    dex
+    sta TPALM,x
+    bne set_palettes
+
+init_player:
+    lda player_attr
+    ora #$20
+    sta player_attr
+
 play_sound:
+    ; lda music_notes_duration
+    ; sta music_timer
+
+    ; lda #%11110000
+    ; sta SQ1_DC
+    ; lda music_notes
+    ; sta SQ1_F
+    ; lda music_notes+1
+    ; sta SQ1_F+1
+    ; lda music_notes+2
+    ; sta SQ1_F+2
+    ; lda music_notes_volume
+    ; sta SQ1_V
+    ;
+    ; lda #%11110000
+    ; sta SQ2_DC
+    ; lda music_notes_sq2
+    ; sta SQ2_F
+    ; lda music_notes_sq2+1
+    ; sta SQ2_F+1
+    ; lda music_notes_sq2+2
+    ; sta SQ2_F+2
+    ; ; lda music_notes_volume
+    ; ; sta SQ2_V
+    ;
+    ; lda music_notes_tr
+    ; sta TR_F
+    ; lda music_notes_tr+1
+    ; sta TR_F+1
+    ; lda music_notes_tr+2
+    ; sta TR_F+2
+    ; lda music_notes_volume
+    ; sta TR_V
 
     ; lda #$04
     ; sta NOISE_V
@@ -19,28 +75,223 @@ play_sound:
     ; lda #$5a
     ; sta NOISE_F+2
 
+    ; lda #$F0
+    ; sta SQ2_DC
+    ; lda #$0f
+    ; sta SQ2_V
+    ; lda #48
+    ; sta SQ2_P
+    ; lda #48
+    ; sta SQ2_F
+
 frame:
-    dec counter
+    lda INP1_DOWN
+    tax
+    and #BUTTON_UP
+    bne move_player_up
+    txa
+    and #BUTTON_LEFT
+    bne move_player_left
+    txa
+    and #BUTTON_DOWN
+    bne move_player_down
+    txa
+    and #BUTTON_RIGHT
+    bne move_player_right
+    jmp post_update_player
+move_player_up:
+    dec player_y
+    jmp update_player
+move_player_left:
+    dec player_x
+    jmp update_player
+move_player_right:
+    inc player_x
+    jmp update_player
+move_player_down:
+    inc player_y
+    jmp update_player
+update_player:
+post_update_player:
+
+update_music:
+    ; dec music_pitch_timer
+    ; bne update_music_note
+    ; lda #$10
+    ; sta music_pitch_timer
+    ; dec NOISE_F+1
+update_music_note:
+    dec music_timer
     bne end
-    inc state
-    lda state
+    inc music_state
+    lda music_state
+    ; and #%00011111
     and #%00000001
     tax
-    lda volume,x
-    sta NOISE_V
-    lda duration,x
-    sta counter
+    lda music_notes_duration,x
+    sta music_timer
+    lda music_notes_volume,x
+    sta SQ1_V
+    sta SQ2_V
+    ; sta TR_V
+    lda music_notes_SQ1_F0,x
+    sta SQ1_F
+    lda music_notes_SQ1_F1,x
+    sta SQ1_F+1
+    lda music_notes_SQ1_F2,x
+    sta SQ1_F+2
+    lda music_notes_SQ2_F0,x
+    sta SQ2_F
+    lda music_notes_SQ2_F1,x
+    sta SQ2_F+1
+    lda music_notes_SQ2_F2,x
+    sta SQ2_F+2
+    ; lda music_notes_tr,x
+    ; sta TR_F
+    ; lda music_notes_tr+1,x
+    ; sta TR_F+1
+    ; lda music_notes_tr+2,x
+    ; sta TR_F+2
+
 end:
     sta VSYNC
     jmp frame
 
-volume:
-    byte 8, 0
-volume:
-    byte 8, 0
-duration:
-    byte $01, $05
-counter:
-    byte $08
-state:
+ram:
+player_tile: .byte $04
+player_palette: .byte $01
+
+MND_BASE EQU $10
+MND_1 EQU 1*MND_BASE
+MND_2 EQU 2*MND_BASE
+MND_3 EQU 3*MND_BASE
+MND_4 EQU 4*MND_BASE
+MNV_0 EQU 0
+MNV_1 EQU 4
+MNV_2 EQU 8
+MNV_3 EQU 15
+
+    MAC NOTE_TABLE
+music_notes_{1}_F0:
+        byte {2}_0 , {3}_0
+music_notes_{1}_F1:
+        byte {2}_1 , {3}_1
+music_notes_{1}_F2:
+        byte {2}_2 , {3}_2
+    ENDM
+
+music_timer: .byte $04
+music_pitch_timer: .byte $01
+music_state: .byte 00
+    NOTE_TABLE SQ1, C_3, N_0
+    NOTE_TABLE SQ2, E_3, N_0
+music_notes:
+    C_3
+    N_0
+    C_3
+    N_0
+    G_3
+    N_0
+    G_3
+    N_0
+    A_3
+    N_0
+    A_3
+    N_0
+    G_3
+    N_0
+    F_3
+    N_0
+    F_3
+    N_0
+    E_3
+    N_0
+    E_3
+    N_0
+    D_3
+    N_0
+    D_3
+    N_0
+    C_3
+    N_0
+    G_3
+    N_0
+    G_3
+    N_0
+
+music_notes_sq2:
+    E_3
+    N_0
+    E_3
+    N_0
+    B_3
+    N_0
+    B_3
+    N_0
+    C_4
+    N_0
+    C_4
+    N_0
+    B_3
+    N_0
+    A_3
+    N_0
+    A_3
+    N_0
+    G_3
+    N_0
+    G_3
+    N_0
+    F_3
+    N_0
+    F_3
+    N_0
+    E_3
+    N_0
+    B_3
+    N_0
+    B_3
+    N_0
+
+music_notes_tr:
+    E_2
+    N_0
+    E_2
+    N_0
+    B_2
+    N_0
+    B_2
+    N_0
+    C_3
+    N_0
+    C_3
+    N_0
+    B_2
+    N_0
+    A_2
+    N_0
+    A_2
+    N_0
+    G_2
+    N_0
+    G_2
+    N_0
+    F_2
+    N_0
+    F_2
+    N_0
+    E_2
+    N_0
+    B_2
+    N_0
+    B_2
+    N_0
+
+music_notes_duration:
+    byte MND_1, MND_1, MND_1, MND_1, MND_1, MND_1, MND_1, MND_1, MND_1, MND_1, MND_1, MND_1, MND_3, MND_1, MND_1, MND_1, MND_1, MND_1, MND_1, MND_1, MND_1, MND_1, MND_1, MND_1, MND_1, MND_1, MND_3, MND_1, MND_1, MND_1, MND_1, MND_1
+
+music_notes_volume:
+    byte MNV_3, 0, MNV_3, 0, MNV_3, 0, MNV_3, 0, MNV_3, 0, MNV_3, 0, MNV_3, 0, MNV_3, 0, MNV_3, 0, MNV_3, 0, MNV_3, 0, MNV_3, 0, MNV_3, 0, MNV_3, 0, MNV_3, 0, MNV_3, 0, MNV_3, 0, MNV_3, 0, MNV_3, 0, MNV_3, 0, MNV_3, 0, MNV_3, 0, MNV_3, 0, MNV_3, 0, MNV_3, 0, MNV_3, 0, MNV_3, 0, MNV_3, 0, MNV_3, 0, MNV_3, 0, MNV_3, 0, MNV_3, 0
+
+temp:
     byte 0
