@@ -1,102 +1,19 @@
     processor 6502
     org $D000
 
-    include "notes.inc"
+)§
+utils = await import("./pp-utils.js")
+controls = await import("./controls.js")
+music = await import("./music.js")
+graphics = await import("./graphics.js")
+)§
+
     include "neslike.inc"
-
-)§ global.utils = global.require("pp-utils.js"); )§
-
-player_x EQU SMAP+0
-player_y EQU SMAP+1
-player_attr EQU SMAP+3
-
-apple_x EQU SMAP+4+0
-apple_y EQU SMAP+4+1
-apple_attr EQU SMAP+4+3
+    include "objects.inc"
 
 main:
 
-init_graphics:
-
-init_tile_data:
-    ldx #tile_data_size-1
-tile_data_store:
-    lda tile_data,x
-    sta TDAT,x
-    dex
-    bpl tile_data_store
-
-init_sprite_data:
-    ldx #sprite_data_size-1
-sprite_data_store:
-    lda sprite_data,x
-    sta SDAT,x
-    dex
-    bpl sprite_data_store
-
-init_tile_palette_data:
-    ldx #tile_palette_data_size-1
-tile_palette_data_store:
-    lda tile_palette_data,x
-    sta TPAL,x
-    dex
-    bpl tile_palette_data_store
-
-init_sprite_palette_data:
-    ldx #sprite_palette_data_size-1
-sprite_palette_data_store:
-    lda sprite_palette_data,x
-    sta SPAL,x
-    dex
-    bpl sprite_palette_data_store
-
-init_tile_map:
-    lda #$00
-    ldx #$FF
-init_tile_map_loop_0:
-    sta TPATM,x
-    dex
-    bne init_tile_map_loop_0
-    sta TPATM,x
-
-    ldx #$FF
-init_tile_map_loop_1:
-    sta TPATM+$100,x
-    dex
-    bne init_tile_map_loop_1
-    sta TPATM+$100,x
-
-    ldx #$FF
-init_tile_map_loop_2:
-    sta TPATM+$200,x
-    dex
-    bne init_tile_map_loop_2
-    sta TPATM+$200,x
-
-    ldx #$FF
-init_tile_map_loop_3:
-    sta TPATM+$300,x
-    dex
-    bne init_tile_map_loop_3
-    sta TPATM+$300,x
-
-init_tile_palettes:
-    lda #$00
-    ldx #$FF
-init_tile_palettes_loop:
-    sta TPALM,x
-    dex
-    bne init_tile_palettes_loop
-    sta TPALM,x
-
-init_sprites:
-    lda #0
-    ldx #$FF
-init_sprites_loop:
-    sta SMAP,x
-    dex
-    bne init_sprites_loop
-    sta SMAP,x
+)§ emit(graphics.init()) )§
 
 init_player:
     lda player_attr
@@ -115,153 +32,9 @@ init_apply_data:
 ; TODO: Sound effects
 frame:
 ; TODO: Set the wanted next direction instead, so that if you press a button and release too early, the snake will still turn at the next grid point
-controls:
-    lda INP1_DOWN
-move_player_up:
-    tax
-    and #BUTTON_UP
-    beq move_player_left
-    lda player_v_y
-    bne move_player_left
-    lda player_x
-    and #%00000111
-    bne move_player_left
-    lda #0
-    sta player_v_x
-    lda #-1
-    sta player_v_y
-    jmp update_player
-move_player_left:
-    txa
-    and #BUTTON_LEFT
-    beq move_player_right
-    lda player_v_x
-    bne move_player_right
-    lda player_y
-    and #%00000111
-    bne move_player_right
-    lda #-1
-    sta player_v_x
-    lda #0
-    sta player_v_y
-    jmp update_player
-move_player_right:
-    txa
-    and #BUTTON_RIGHT
-    beq move_player_down
-    lda player_v_x
-    bne move_player_down
-    lda player_y
-    and #%00000111
-    bne move_player_down
-    lda #1
-    sta player_v_x
-    lda #0
-    sta player_v_y
-    jmp update_player
-move_player_down:
-    txa
-    and #BUTTON_DOWN
-    beq update_player
-    lda player_v_y
-    bne update_player
-    lda player_x
-    and #%00000111
-    bne update_player
-    lda #0
-    sta player_v_x
-    lda #1
-    sta player_v_y
-update_player:
-    clc
-    lda player_x
-    adc player_v_x
-    sta player_x
-    clc
-    lda player_y
-    adc player_v_y
-    sta player_y
-post_update_player:
 
-update_music:
-    ; dec music_pitch_timer
-    ; bne update_music_note
-    ; lda #$10
-    ; sta music_pitch_timer
-    ; dec NOISE_F+1
-update_music_note:
-update_square_waves:
-    dec music_timer_sq
-    bne update_triangle_wave
-    inc music_state_sq
-    lda music_state_sq
-    cmp #56
-    bne play_music_note_sq
-    lda #$00
-    sta music_state_sq
-play_music_note_sq:
-    tax
-    lda music_notes_duration_sq,x
-    sta music_timer_sq
-    lda music_notes_volume_sq,x
-    sta SQ1_V
-    ; sta SQ2_V
-    lda music_notes_SQ1_F0,x
-    sta SQ1_F
-    lda music_notes_SQ1_F1,x
-    sta SQ1_F+1
-    lda music_notes_SQ1_F2,x
-    sta SQ1_F+2
-    lda music_notes_SQ2_F0,x
-    sta SQ2_F
-    lda music_notes_SQ2_F1,x
-    sta SQ2_F+1
-    lda music_notes_SQ2_F2,x
-    sta SQ2_F+2
-update_triangle_wave:
-    dec music_timer_tr
-    bne update_noise
-    inc music_state_tr
-    lda music_state_tr
-    cmp #16
-    bne play_music_note_tr
-    lda #$00
-    sta music_state_tr
-play_music_note_tr:
-    tax
-    lda music_notes_duration_tr,x
-    sta music_timer_tr
-    lda music_notes_volume_tr,x
-    sta TR_V
-    lda music_notes_TR_F0,x
-    sta TR_F
-    lda music_notes_TR_F1,x
-    sta TR_F+1
-    lda music_notes_TR_F2,x
-    sta TR_F+2
-update_noise:
-    dec music_timer_ns
-    bne end
-    inc music_state_ns
-    lda music_state_ns
-    cmp #12
-    bne play_music_note_ns
-    lda #$00
-    sta music_state_ns
-play_music_note_ns:
-    tax
-    lda music_notes_duration_ns,x
-    sta music_timer_ns
-    lda music_notes_volume_ns,x
-    sta NOISE_V
-    lda music_notes_ns_mode,x
-    sta NOISE_M
-    lda music_notes_NS_F0,x
-    sta NOISE_F
-    lda music_notes_NS_F1,x
-    sta NOISE_F+1
-    lda music_notes_NS_F2,x
-    sta NOISE_F+2
+)§ emit(controls.instructions()) )§
+)§ emit(music.instructions()) )§
 
 end:
     sta VSYNC
@@ -271,110 +44,8 @@ ram:
 player_v_x: .byte 0
 player_v_y: .byte -1
 
-music_timer_sq: .byte $01
-music_timer_tr: .byte $01
-music_timer_ns: .byte $01
-music_pitch_timer: .byte $01
-music_state_sq: .word $00FF
-music_state_tr: .word $00FF
-music_state_ns: .word $00FF
-)§
-const n = global.utils.notes;
-
-const duration_base = 0x10;
-const dur = (d) => duration_base * d;
-const vol = (v) => v;
-
-const sq1_table_src = [
-    n.g4, n.g4, n.d5, n.d5, n.e5, n.e5, n.d5,
-    n.c5, n.c5, n.b4, n.b4, n.a4, n.a4, n.g4,
-    n.d5, n.d5, n.c5, n.c5, n.b4, n.b4, n.a4,
-    n.d5, n.d5, n.c5, n.c5, n.b4, n.b4, n.a4,
-];
-const sq1_table = sq1_table_src.flatMap(x => [x, n.blank]);
-
-const sq2_table_src = [
-    n.d4, n.d4, n.a4, n.a4, n.b4, n.b4, n.a4,
-    n.g4, n.g4, n.fs4, n.fs4, n.e4, n.e4, n.d4,
-    n.a4, n.a4, n.g4, n.g4, n.fs4, n.fs4, n.e4,
-    n.a4, n.a4, n.g4, n.g4, n.fs4, n.fs4, n.e4,
-];
-const sq2_table = sq2_table_src.flatMap(x => [x, n.blank]);
-const durations_sq = sq1_table_src.flatMap((x, i) =>
-    [(i + 1) % 7 == 0 ? dur(3) : dur(1), dur(1)]
-);
-const volumes_sq = sq1_table_src.flatMap(x => [vol(15), vol(0)]);
-
-// Protons baseline:
-// g2 g2 c3 g2 c3 g2 d3 g2
-// g2 c3 g2 d3 g2 c3 g2 d3
-
-const tr_table_src = [
-    n.g2, n.g2, n.c3, n.g2, n.c3, n.g2, n.d3, n.g2,
-    n.g2, n.c3, n.g2, n.d3, n.g2, n.c3, n.g2, n.d3,
-];
-
-const tr_table = tr_table_src;
-const durations_tr = tr_table_src.map(x => dur(4));
-const volumes_tr = tr_table_src.map(x => vol(15));
-
-const hi_hat = global.utils.mkNote(44100);
-const hi_hat_dur = 1;
-const base_drum = global.utils.mkNote(22000);
-const base_drum_dur = 4;
-
-const noise_table_src = [
-    hi_hat, hi_hat, base_drum, hi_hat, hi_hat, base_drum,
-];
-
-const noise_table = noise_table_src.flatMap(x => [x, n.blank]);
-const durations_ns = noise_table_src.flatMap((x, i) =>
-    (i + 1) % 3 == 0
-        ? [base_drum_dur, dur(4) - base_drum_dur]
-        : [hi_hat_dur, dur(2) - hi_hat_dur]
-);
-const volumes_ns = noise_table_src.flatMap(x => [vol(15), vol(0)]);
-const ns_modes = noise_table_src.flatMap((x, i) =>
-    (i + 1) % 3 == 0
-        ? [0x80, 0x00]
-        : [0x80, 0x00]
-);
-
-return `
-${global.utils.noteTable("SQ1", sq1_table)}
-${global.utils.noteTable("SQ2", sq2_table)}
-${global.utils.noteTable("TR", tr_table)}
-${global.utils.noteTable("NS", noise_table)}
-music_notes_duration_sq:
-    byte ${durations_sq.join(', ')}
-music_notes_duration_tr:
-    byte ${durations_tr.join(', ')}
-music_notes_duration_ns:
-    byte ${durations_ns.join(', ')}
-music_notes_volume_sq:
-    byte ${volumes_sq.join(', ')}
-music_notes_volume_tr:
-    byte ${volumes_tr.join(', ')}
-music_notes_volume_ns:
-    byte ${volumes_ns.join(', ')}
-music_notes_ns_mode:
-    byte ${ns_modes.join(', ')}
-`;
-)§
-
-tile_data:    
-    byte 0, 0, 0, 1, 0, 0, 0, 0, 16, 0, 0, 0, 0, 0, 1, 0
-tile_data_size = . - tile_data
-tile_palette_data:    
-    byte 25, 42, 25, 25
-tile_palette_data_size = . - tile_palette_data
-sprite_data:    
-    byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
-sprite_data_size = . - sprite_data
-sprite_palette_data:    
-    byte 39, 39, 39, 39
-    byte 22, 22, 22, 22
-sprite_palette_data_size = . - sprite_palette_data
+)§ emit(music.data()) )§
+)§ emit(graphics.data()) )§
 
 temp:
     byte 0

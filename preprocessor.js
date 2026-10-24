@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 
 const argv = process.argv.slice(2);
 
@@ -10,10 +11,13 @@ if (argv.length != 1) {
 const raw = fs.readFileSync(argv[0], { encoding: "utf-8" });
 const outFile = argv[0].replace(/\.pp\./, '.');
 
+const require_cache = {};
+const __dirname__ = path.resolve(".");
+
+let __emitted_src = "";
 const global = {
-    require: (file_path) => {
-        const code = fs.readFileSync(file_path, { encoding: "utf-8" });
-        return new Function("global", code)(global);
+    emit(string) {
+        __emitted_src += string;
     },
 };
 
@@ -26,16 +30,12 @@ let cursor = 0;
 while ((match = regex.exec(raw)) != null) {
     // console.error("found match: ", match[1]);
 
-    let result = new Function("global", match[1])(global);
-    if (typeof result === "undefined") {
-        result = "";
-    }
-    if (typeof result !== "string") {
-        throw new Error("preprocessor result must be a string, found " + typeof result);
-    }
+    const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+    await new AsyncFunction("global", `with (global) {${match[1]}}`)(global);
 
     out += raw.slice(cursor, match.index);
-    out += result;
+    out += __emitted_src;
+    __emitted_src = "";
     cursor = match[0].length + match.index;
 }
 

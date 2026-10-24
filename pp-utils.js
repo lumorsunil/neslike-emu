@@ -1,3 +1,5 @@
+import { asm } from "./asm.js";
+
 const mkNote = (freq) => {
   const s = freq.toString().split(".");
   const int = +s[0];
@@ -166,7 +168,7 @@ const notes = {
 };
 
 const noteTable = (label, notes) => {
-  return `
+  return asm`
 music_notes_${label}_F0:
     byte ${notes.map((n) => `$${n.lo.toString(16).padStart(2, "0")}`).join(", ")}
 music_notes_${label}_F1:
@@ -181,4 +183,4 @@ const intersperse = (arr, delim) =>
     return index === 0 ? [curr] : [...acc, delim, curr];
   }, []);
 
-return { mkNote, notes, noteTable, intersperse };
+export { mkNote, notes, noteTable, intersperse };

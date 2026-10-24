@@ -1,20 +1,14 @@
     processor 6502
     org $D000
 
-    include "notes.inc"
     include "neslike.inc"
 
 
 
-player_x EQU SMAP+0
-player_y EQU SMAP+1
-player_attr EQU SMAP+3
-
-apple_x EQU SMAP+4+0
-apple_y EQU SMAP+4+1
-apple_attr EQU SMAP+4+3
+    include "objects.inc"
 
 main:
+
 
 init_graphics:
 
@@ -98,6 +92,7 @@ init_sprites_loop:
     bne init_sprites_loop
     sta SMAP,x
 
+
 init_player:
     lda player_attr
     ora #$20
@@ -115,6 +110,8 @@ init_apply_data:
 ; TODO: Sound effects
 frame:
 ; TODO: Set the wanted next direction instead, so that if you press a button and release too early, the snake will still turn at the next grid point
+
+
 controls:
     lda INP1_DOWN
 move_player_up:
@@ -181,7 +178,7 @@ update_player:
     lda player_y
     adc player_v_y
     sta player_y
-post_update_player:
+
 
 update_music:
     ; dec music_pitch_timer
@@ -263,6 +260,7 @@ play_music_note_ns:
     lda music_notes_NS_F2,x
     sta NOISE_F+2
 
+
 end:
     sta VSYNC
     jmp frame
@@ -270,6 +268,7 @@ end:
 ram:
 player_v_x: .byte 0
 player_v_y: .byte -1
+
 
 music_timer_sq: .byte $01
 music_timer_tr: .byte $01
@@ -340,6 +339,7 @@ sprite_palette_data:
     byte 39, 39, 39, 39
     byte 22, 22, 22, 22
 sprite_palette_data_size = . - sprite_palette_data
+
 
 temp:
     byte 0
