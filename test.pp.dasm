@@ -6,24 +6,15 @@ utils = await import("./pp-utils.js")
 controls = await import("./controls.js")
 music = await import("./music.js")
 graphics = await import("./graphics.js")
+objects = await import("./objects.js")
 )§
 
     include "neslike.inc"
-    include "objects.inc"
 
 main:
 
 )§ emit(graphics.init()) )§
-
-init_player:
-    lda player_attr
-    ora #$20
-    sta player_attr
-init_apply_data:
-    lda apple_attr
-    ora #$21
-    sta apple_attr
-    jsr spawn_apple
+)§ emit(objects.init()) )§
 
 ; TODO: Eat apple
 ; TODO: Snake body
@@ -31,7 +22,6 @@ init_apply_data:
 ; TODO: Score
 ; TODO: Sound effects
 frame:
-; TODO: Set the wanted next direction instead, so that if you press a button and release too early, the snake will still turn at the next grid point
 
 )§ emit(controls.instructions()) )§
 )§ emit(music.instructions()) )§
@@ -41,9 +31,7 @@ end:
     jmp frame
 
 ram:
-player_v_x: .byte 0
-player_v_y: .byte -1
-
+)§ emit(controls.data()) )§
 )§ emit(music.data()) )§
 )§ emit(graphics.data()) )§
 
@@ -51,11 +39,4 @@ temp:
     byte 0
 
 subroutines:
-spawn_apple:
-    lda RAND
-    and #%11111000
-    sta apple_x
-    lda RAND
-    and #%11111000
-    sta apple_y
-    rts
+)§ emit(objects.subroutines()) )§

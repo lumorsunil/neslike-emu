@@ -1,11 +1,9 @@
     processor 6502
     org $D000
 
+
+
     include "neslike.inc"
-
-
-
-    include "objects.inc"
 
 main:
 
@@ -93,15 +91,24 @@ init_sprites_loop:
     sta SMAP,x
 
 
+player_x EQU SMAP+0
+player_y EQU SMAP+1
+player_attr EQU SMAP+3
+
+apple_x EQU SMAP+4+0
+apple_y EQU SMAP+4+1
+apple_attr EQU SMAP+4+3
+
 init_player:
     lda player_attr
-    ora #$20
+    ora #$20 ; enabled | palette = 0
     sta player_attr
 init_apply_data:
     lda apple_attr
-    ora #$21
+    ora #$21 ; enabled | palette = 1
     sta apple_attr
     jsr spawn_apple
+
 
 ; TODO: Eat apple
 ; TODO: Snake body
@@ -178,6 +185,7 @@ update_player:
     lda player_y
     adc player_v_y
     sta player_y
+update_controls_end:
 
 
 update_music:
@@ -238,7 +246,7 @@ play_music_note_tr:
     sta TR_F+2
 update_noise:
     dec music_timer_ns
-    bne end
+    bne update_music_end
     inc music_state_ns
     lda music_state_ns
     cmp #12
@@ -259,6 +267,7 @@ play_music_note_ns:
     sta NOISE_F+1
     lda music_notes_NS_F2,x
     sta NOISE_F+2
+update_music_end:
 
 
 end:
@@ -266,6 +275,7 @@ end:
     jmp frame
 
 ram:
+
 player_v_x: .byte 0
 player_v_y: .byte -1
 
@@ -345,6 +355,7 @@ temp:
     byte 0
 
 subroutines:
+
 spawn_apple:
     lda RAND
     and #%11111000
@@ -353,4 +364,5 @@ spawn_apple:
     and #%11111000
     sta apple_y
     rts
+
 

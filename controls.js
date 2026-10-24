@@ -1,5 +1,7 @@
 import { asm } from "./asm.js";
 
+ // TODO: Set the wanted next direction instead, so that if you press a button and release too early, the snake will still turn at the next grid point
+
 const instructions = () => asm`
 controls:
     lda INP1_DOWN
@@ -67,5 +69,12 @@ update_player:
     lda player_y
     adc player_v_y
     sta player_y
+update_controls_end:
 `;
-export { instructions };
+
+const data = () => asm`
+player_v_x: .byte 0
+player_v_y: .byte -1
+`;
+
+export { instructions, data };

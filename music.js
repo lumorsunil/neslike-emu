@@ -59,7 +59,7 @@ play_music_note_tr:
     sta TR_F+2
 update_noise:
     dec music_timer_ns
-    bne end
+    bne update_music_end
     inc music_state_ns
     lda music_state_ns
     cmp #12
@@ -80,6 +80,7 @@ play_music_note_ns:
     sta NOISE_F+1
     lda music_notes_NS_F2,x
     sta NOISE_F+2
+update_music_end:
 `;
 
 const generateTables = () => {
