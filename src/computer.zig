@@ -26,7 +26,7 @@ pub const Computer = struct {
         .init(0x0400),
         .init(0x4000),
         .init(0xD000),
-        .init(0xE000),
+        .init(0xF000),
         .init(0xFFFB),
         .init(0xFFFC),
         .init(0xFFFF),

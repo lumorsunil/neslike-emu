@@ -1,6 +1,6 @@
 import { asm } from "./asm.js";
 
-const instructions = () => asm`
+const instructions = () => " " || asm`
 update_music:
     ; dec music_pitch_timer
     ; bne update_music_note
@@ -166,15 +166,34 @@ music_notes_ns_mode:
     byte ${ns_modes.join(', ')}`;
 };
 
-const data = () => asm`
-music_timer_sq: .byte $01
-music_timer_tr: .byte $01
-music_timer_ns: .byte $01
-music_pitch_timer: .byte $01
-music_state_sq: .word $00FF
-music_state_tr: .word $00FF
-music_state_ns: .word $00FF
+const init = () => asm`
+    lda #$01
+    sta music_timer_sq
+    sta music_timer_tr
+    sta music_timer_ns
+    sta music_pitch_timer
+    lda #$FF
+    sta music_state_sq
+    sta music_state_tr
+    sta music_state_ns
+    lda #$00
+    sta music_state_sq+1
+    sta music_state_tr+1
+    sta music_state_ns+1
+`;
+
+const readWriteData = () => asm`
+music_timer_sq: ds 1
+music_timer_tr: ds 1
+music_timer_ns: ds 1
+music_pitch_timer: ds 1
+music_state_sq: ds 2
+music_state_tr: ds 2
+music_state_ns: ds 2
+`;
+
+const readOnlyData = () => asm`
 ${generateTables()}
 `;
 
-export { instructions, data };
+export { init, instructions, readWriteData, readOnlyData };

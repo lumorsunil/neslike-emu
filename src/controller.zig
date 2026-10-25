@@ -13,6 +13,7 @@ pub const Controller = struct {
     const Button = enum {
         down_wasd_ijkl,
         pressed_wasd_ijkl,
+        released_wasd_ijkl,
     };
 
     pub fn read(_: @This(), addr: Addr) Error!u8 {
@@ -37,6 +38,16 @@ pub const Controller = struct {
                 .b5 = @intFromBool(rl.isKeyPressed(.j) or rl.isGamepadButtonPressed(0, .right_face_left)),
                 .b6 = @intFromBool(rl.isKeyPressed(.k) or rl.isGamepadButtonPressed(0, .right_face_down)),
                 .b7 = @intFromBool(rl.isKeyPressed(.l) or rl.isGamepadButtonPressed(0, .right_face_right)),
+            }).toInt(),
+            .released_wasd_ijkl => (Byte{
+                .b0 = @intFromBool(rl.isKeyReleased(.w) or rl.isGamepadButtonReleased(0, .left_face_up)),
+                .b1 = @intFromBool(rl.isKeyReleased(.a) or rl.isGamepadButtonReleased(0, .left_face_left)),
+                .b2 = @intFromBool(rl.isKeyReleased(.s) or rl.isGamepadButtonReleased(0, .left_face_down)),
+                .b3 = @intFromBool(rl.isKeyReleased(.d) or rl.isGamepadButtonReleased(0, .left_face_right)),
+                .b4 = @intFromBool(rl.isKeyReleased(.i) or rl.isGamepadButtonReleased(0, .right_face_up)),
+                .b5 = @intFromBool(rl.isKeyReleased(.j) or rl.isGamepadButtonReleased(0, .right_face_left)),
+                .b6 = @intFromBool(rl.isKeyReleased(.k) or rl.isGamepadButtonReleased(0, .right_face_down)),
+                .b7 = @intFromBool(rl.isKeyReleased(.l) or rl.isGamepadButtonReleased(0, .right_face_right)),
             }).toInt(),
         };
     }

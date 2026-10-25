@@ -1,80 +1,172 @@
 import { asm } from "./asm.js";
 
- // TODO: Set the wanted next direction instead, so that if you press a button and release too early, the snake will still turn at the next grid point
-
 const instructions = () => asm`
 controls:
+    SUBROUTINE
+
+; update_controls_release:
+;     lda INP1_RELEASED
+;     tax
+; release_up:
+;     and #BUTTON_UP
+;     beq release_left
+;     lda #0
+;     sta player_wanted_v_y
+; release_left:
+;     txa
+;     and #BUTTON_LEFT
+;     beq release_right
+;     lda #0
+;     sta player_wanted_v_x
+; release_right:
+;     txa
+;     and #BUTTON_RIGHT
+;     beq release_down
+;     lda #0
+;     sta player_wanted_v_x
+; release_down:
+;     txa
+;     and #BUTTON_DOWN
+;     beq update_controls_hold
+;     lda #0
+;     sta player_wanted_v_y
+;
+
+;
+;
+
+PLAYER_SPEED EQU 2
+
+.update_controls_hold:
     lda INP1_DOWN
-move_player_up:
+.hold_up:
     tax
     and #BUTTON_UP
-    beq move_player_left
-    lda player_v_y
-    bne move_player_left
-    lda player_x
-    and #%00000111
-    bne move_player_left
+    beq .hold_down
+    lda #-PLAYER_SPEED
+    sta player_wanted_v_y
     lda #0
-    sta player_v_x
-    lda #-1
-    sta player_v_y
-    jmp update_player
-move_player_left:
-    txa
-    and #BUTTON_LEFT
-    beq move_player_right
-    lda player_v_x
-    bne move_player_right
-    lda player_y
-    and #%00000111
-    bne move_player_right
-    lda #-1
-    sta player_v_x
-    lda #0
-    sta player_v_y
-    jmp update_player
-move_player_right:
-    txa
-    and #BUTTON_RIGHT
-    beq move_player_down
-    lda player_v_x
-    bne move_player_down
-    lda player_y
-    and #%00000111
-    bne move_player_down
-    lda #1
-    sta player_v_x
-    lda #0
-    sta player_v_y
-    jmp update_player
-move_player_down:
+    sta player_wanted_v_x
+    jmp .hold_left
+.hold_down:
     txa
     and #BUTTON_DOWN
-    beq update_player
-    lda player_v_y
-    bne update_player
+    beq .hold_left
+    lda #PLAYER_SPEED
+    sta player_wanted_v_y
+    lda #0
+    sta player_wanted_v_x
+.hold_left:
+    txa
+    and #BUTTON_LEFT
+    beq .hold_right
+    lda #-PLAYER_SPEED
+    sta player_wanted_v_x
+    lda #0
+    sta player_wanted_v_y
+    jmp .update_velocity
+.hold_right:
+    txa
+    and #BUTTON_RIGHT
+    beq .update_velocity
+    lda #PLAYER_SPEED
+    sta player_wanted_v_x
+    lda #0
+    sta player_wanted_v_y
+
+.update_velocity:
+    lda #0
+    sta temp+2
+
+.check_wanted_x:
+    lda player_y
+    and #%111
+    bne .check_wanted_y
+    lda player_wanted_v_x
+    beq .check_wanted_y
+    ldx player_v_x
+    bne .check_wanted_y
+    sta player_v_x
+    sta temp+2
+
+.update_player_body_spawn_type_turn_horizontally:
+    asl               ; a = player_v_x << 1 ==> carry = sign(player_v_x)
+    rol temp          ; temp ´rol´ carry ==> temp[bit0] = carry
+    lda player_v_y    ; a = player_v_y
+    asl               ; a = player_v_y << 1 ==> carry = sign(player_v_y)
+    rol temp          ; temp ´rol´ carry ==> temp[bit1] = temp[bit0]; temp[bit0] = carry
+    lda temp          ; a = temp
+    and #%11          ; a &= 0b11
+    sta player_body_spawn_type
+
+    ; TODO: set player_body_spawn_type
+    ; 
+    ; 00 = left top
+    ; 01 = left bottom
+    ; 10 = right top 
+    ; 11 = right bottom 
+    ; if (right and up) bottom_right
+    ; if (left and up) bottom_left
+    ; if (left and down) top_left
+    ; if (right and down) top_right
+
+    stx player_v_y
+
+.check_wanted_y:
     lda player_x
-    and #%00000111
-    bne update_player
+    and #%111
+    bne .update_player_body_spawn_type
+    lda player_wanted_v_y
+    beq .update_player_body_spawn_type
+    ldx player_v_y
+    bne .update_player_body_spawn_type
+    sta player_v_y
+    sta temp+2
+
+.update_player_body_spawn_type_turn_vertically:
+    asl
+    ror temp
+    lda player_v_y
+    asl
+    ror temp
+    lda temp
+    rol
+    rol
+    rol
+    and #%11
+    sta player_body_spawn_type
+
+    stx player_v_x
+
+.update_player_body_spawn_type:
+    lda temp+2
+    bne .end
+    ldx #4
+    lda player_v_y
+    bne .set_player_body_spawn_type
+    ldx #5
+.set_player_body_spawn_type:
+    stx player_body_spawn_type
+
+.end:
+    inc player_body_spawn_type
+`;
+
+const init = () => asm`
     lda #0
     sta player_v_x
-    lda #1
+    sta player_wanted_v_x
+    lda #-PLAYER_SPEED
     sta player_v_y
-update_player:
-    clc
-    lda player_x
-    adc player_v_x
-    sta player_x
-    clc
-    lda player_y
-    adc player_v_y
-    sta player_y
-update_controls_end:
+    sta player_wanted_v_y
 `;
 
-const data = () => asm`
-player_v_x: .byte 0
-player_v_y: .byte -1
+const readWriteData = () => asm`
+player_v_x: ds 1
+player_v_y: ds 1
+player_wanted_v_x: ds 1
+player_wanted_v_y: ds 1
+player_body_spawn_type: ds 1
 `;
 
-export { instructions, data };
+export { init, instructions, readWriteData };

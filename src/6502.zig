@@ -7586,6 +7586,31 @@ test "instruction operation CMP immediate" {
     try zero_case.testExpected();
 }
 
+test "instruction operation ORA post indexed indirect zero y" {
+    var basic_case = try CPUTester.init(.ORA(.post_indexed_indirect_zero_y, 0xcd), &.{});
+    defer basic_case.deinit();
+
+    basic_case.fixture.registers.a = .fromInt(0b00001001);
+    basic_case.fixture.registers.y = .fromInt(0x3);
+
+    try basic_case.expectStartSequence();
+    try basic_case.expectRead(0, basic_case.program);
+    try basic_case.expectRead(1, basic_case.program);
+    try basic_case.expectRead(0x00cd, null);
+    basic_case.fixture.data_bus = .fromInt(0xce);
+    try basic_case.expectRead(0x00ce, null);
+    basic_case.fixture.data_bus = .fromInt(0x35);
+    try basic_case.expectRead(0x35ce + 0x3, null);
+    basic_case.fixture.data_bus = .fromInt(0b00101010);
+    try basic_case.expectExecute();
+
+    basic_case.expected.registers.a = .fromInt(0b00101011);
+    basic_case.expected.registers.y = .fromInt(0x3);
+    basic_case.expected.data_bus = .fromInt(0x2a);
+
+    try basic_case.testExpected();
+}
+
 test "instruction operation LDX immediate" {
     var basic_case = try CPUTester.init(.LDX(.immediate, 0b00101010), &.{});
     defer basic_case.deinit();

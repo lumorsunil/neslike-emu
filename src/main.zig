@@ -182,8 +182,8 @@ fn initMemoryRenderBuffers(ctx: *MainContext) !void {
 
 fn drawMemoryRenderBufferBackgrounds(ctx: *MainContext) void {
     ctx.memory_render_buffer.begin();
-    ctx.computer.modules.get(Memory).write_events = .full;
-    drawMemoryAsCells(&ctx.computer, false);
+    // ctx.computer.modules.get(Memory).write_events = .full;
+    drawMemoryAsCells(&ctx.computer, true);
     ctx.memory_render_buffer.end();
 
     ctx.sprite_map_render_buffer.begin();
@@ -429,10 +429,10 @@ fn drawMemoryAsCells(computer: *Computer, draw_background: bool) void {
     drawMemoryCells(&memory.chip.memory, write_events, .{
         .cols = UI.memory_cell_cols,
         .color_override = if (draw_background) .gray else null,
-        .paged = .{
-            .active_cell = computer.cpu.registers.pc.toInt(),
-            .rows_per_page = UI.memory_cell_rows,
-        },
+        // .paged = .{
+        //     .active_cell = computer.cpu.registers.pc.toInt(),
+        //     .rows_per_page = UI.memory_cell_rows,
+        // },
     });
 }
 
@@ -523,6 +523,7 @@ fn drawSpriteMapAsCells(computer: *Computer, draw_background: bool) void {
 const DrawMemoryCellsOptions = struct {
     cols: usize,
     color_override: ?rl.Color = null,
+    debug: bool = false,
     paged: ?struct {
         active_cell: usize,
         rows_per_page: usize,
@@ -728,4 +729,8 @@ fn drawController(computer: Computer, textures: Textures) !void {
         const color: rl.Color = if (data == 1) .yellow else .gray;
         textures.button.texture.drawPro(textures.button_src, dst, .zero(), 90, color);
     }
+}
+
+test {
+    std.testing.refAllDecls(@This());
 }

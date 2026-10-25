@@ -1,13 +1,27 @@
-    processor 6502
-    org $D000
-
 )§
 utils = await import("./pp-utils.js")
 controls = await import("./controls.js")
 music = await import("./music.js")
 graphics = await import("./graphics.js")
 objects = await import("./objects.js")
+logic = await import("./logic.js")
 )§
+
+    processor 6502
+
+    seg.u variables
+ram:
+    org $0000
+temp:
+    ds 3
+)§ emit(controls.readWriteData()) )§
+)§ emit(logic.readWriteData()) )§
+
+    org $0200
+)§ emit(music.readWriteData()) )§
+
+    seg code
+    org $D000
 
     include "neslike.inc"
 
@@ -15,28 +29,32 @@ main:
 
 )§ emit(graphics.init()) )§
 )§ emit(objects.init()) )§
+)§ emit(controls.init()) )§
+)§ emit(music.init()) )§
+)§ emit(logic.init()) )§
 
-; TODO: Eat apple
 ; TODO: Snake body
+;   TODO: Snake body trail
+;     TODO: Turn mapping, we need to map depending on which direction we come from into the direction we go to
+;   TODO: Snake tail
 ; TODO: Game over
 ; TODO: Score
 ; TODO: Sound effects
 frame:
 
 )§ emit(controls.instructions()) )§
+)§ emit(logic.instructions()) )§
 )§ emit(music.instructions()) )§
 
 end:
     sta VSYNC
     jmp frame
 
-ram:
-)§ emit(controls.data()) )§
-)§ emit(music.data()) )§
-)§ emit(graphics.data()) )§
-
-temp:
-    byte 0
-
 subroutines:
 )§ emit(objects.subroutines()) )§
+
+    seg rom
+    org $E000
+
+)§ emit(music.readOnlyData()) )§
+)§ emit(graphics.readOnlyData()) )§

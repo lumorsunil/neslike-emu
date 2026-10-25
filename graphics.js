@@ -84,12 +84,68 @@ init_sprites_loop:
     sta SMAP,x
 `;
 
-const data = () => asm`
+const readOnlyData = () => asm`
 tile_data:    
     byte 0, 0, 0, 1, 0, 0, 0, 0, 16, 0, 0, 0, 0, 0, 1, 0
+; top_left
+    byte %00000000, %00000000
+    byte %10100000, %10101010
+    byte %10101000, %10101010
+    byte %10101000, %10101010
+    byte %10101000, %10101010
+    byte %10101000, %10101010
+    byte %10101000, %10101010
+    byte %10101000, %00000000
+; bottom_left
+    byte %10101000, %00000000
+    byte %10101000, %10101010
+    byte %10101000, %10101010
+    byte %10101000, %10101010
+    byte %10101000, %10101010
+    byte %10101000, %10101010
+    byte %10100000, %10101010
+    byte %00000000, %00000000
+; top_right
+    byte %00000000, %00000000
+    byte %10101010, %00001010
+    byte %10101010, %00101010
+    byte %10101010, %00101010
+    byte %10101010, %00101010
+    byte %10101010, %00101010
+    byte %10101010, %00101010
+    byte %00000000, %00101010
+; bottom_right
+    byte %00000000, %00101010
+    byte %10101010, %00101010
+    byte %10101010, %00101010
+    byte %10101010, %00101010
+    byte %10101010, %00101010
+    byte %10101010, %00101010
+    byte %10101010, %00001010
+    byte %00000000, %00000000
+; vertical
+    byte %11111100, %00111111
+    byte %11111100, %00111111
+    byte %11111111, %00001111
+    byte %11111111, %00001111
+    byte %11111111, %00001111
+    byte %11111111, %00001111
+    byte %11111100, %00111111
+    byte %11111100, %00111111
+; horizontal
+    byte %00001111, %11110000
+    byte %11111111, %11111111
+    byte %11111111, %11111111
+    byte %11111111, %11111111
+    byte %11111111, %11111111
+    byte %11111111, %11111111
+    byte %11110000, %00001111
+    byte %00000000, %00000000
 tile_data_size = . - tile_data
+
 tile_palette_data:    
     byte 25, 42, 25, 25
+    byte 25, 39, 29, 39
 tile_palette_data_size = . - tile_palette_data
 sprite_data:    
     byte $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
@@ -100,4 +156,4 @@ sprite_palette_data:
 sprite_palette_data_size = . - sprite_palette_data
 `;
 
-export { init, data };
+export { init, readOnlyData };
