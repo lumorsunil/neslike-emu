@@ -33,10 +33,11 @@ main:
 )§ emit(music.init()) )§
 )§ emit(logic.init()) )§
 
+    lda #0
+    sta $FFFF
+
 ; TODO: Snake body
-;   TODO: Snake body trail
-;     TODO: Turn mapping, we need to map depending on which direction we come from into the direction we go to
-;   TODO: Snake tail
+;   TODO: Eating an apple increases body size
 ; TODO: Game over
 ; TODO: Score
 ; TODO: Sound effects
@@ -58,3 +59,4 @@ subroutines:
 
 )§ emit(music.readOnlyData()) )§
 )§ emit(graphics.readOnlyData()) )§
+)§ emit(logic.readOnlyData()) )§

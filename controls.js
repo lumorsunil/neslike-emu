@@ -30,10 +30,7 @@ controls:
 ;     beq update_controls_hold
 ;     lda #0
 ;     sta player_wanted_v_y
-;
 
-;
-;
 
 PLAYER_SPEED EQU 2
 
@@ -92,11 +89,34 @@ PLAYER_SPEED EQU 2
 .update_player_body_spawn_type_turn_horizontally:
     asl               ; a = player_v_x << 1 ==> carry = sign(player_v_x)
     rol temp          ; temp ´rol´ carry ==> temp[bit0] = carry
+
+    ; update head sprite flip
+    lda temp
+    sta temp+1
+    asl temp+1
+    asl temp+1
+    lda temp+1
+    and #%00000100 ; select horizontal flip
+    sta temp+1
+
+    lda player_attr
+    and #%11110011 ; turn off vertical flip (and hf)
+    ora temp+1
+    sta player_attr
+    ; end update head sprite flip
+
+    ; update head sprite pattern map
+    lda #1
+    sta player_pattern
+    ; end update head sprite pattern map
+
     lda player_v_y    ; a = player_v_y
     asl               ; a = player_v_y << 1 ==> carry = sign(player_v_y)
     rol temp          ; temp ´rol´ carry ==> temp[bit1] = temp[bit0]; temp[bit0] = carry
     lda temp          ; a = temp
-    and #%11          ; a &= 0b11
+    and #%011          ; a &= 0b11
+    clc
+    adc #%100
     sta player_body_spawn_type
 
     ; TODO: set player_body_spawn_type
@@ -125,15 +145,33 @@ PLAYER_SPEED EQU 2
 
 .update_player_body_spawn_type_turn_vertically:
     asl
-    ror temp
-    lda player_v_y
-    asl
-    ror temp
+    rol temp
+
+    ; update head sprite flip
     lda temp
-    rol
-    rol
-    rol
-    and #%11
+    sta temp+1
+    asl temp+1
+    asl temp+1
+    lda temp+1
+    and #%00001000 ; select vertical flip
+    sta temp+1
+
+    lda player_attr
+    and #%11110011 ; turn off horizontal flip (and vf)
+    ora temp+1
+    sta player_attr
+    ; end update head sprite flip
+
+    ; update head sprite pattern map
+    lda #0
+    sta player_pattern
+    ; end update head sprite pattern map
+
+    lda player_v_x
+    asl
+    rol temp
+    lda temp
+    and #%11 ; 00 = bottom_left, 01 = top_left
     sta player_body_spawn_type
 
     stx player_v_x
@@ -141,24 +179,25 @@ PLAYER_SPEED EQU 2
 .update_player_body_spawn_type:
     lda temp+2
     bne .end
-    ldx #4
+    ldx #%1000
     lda player_v_y
     bne .set_player_body_spawn_type
-    ldx #5
+    ldx #%1001
 .set_player_body_spawn_type:
     stx player_body_spawn_type
 
 .end:
-    inc player_body_spawn_type
 `;
 
 const init = () => asm`
     lda #0
     sta player_v_x
     sta player_wanted_v_x
+    sta tail_v_x
     lda #-PLAYER_SPEED
     sta player_v_y
     sta player_wanted_v_y
+    sta tail_v_y
 `;
 
 const readWriteData = () => asm`
@@ -167,6 +206,8 @@ player_v_y: ds 1
 player_wanted_v_x: ds 1
 player_wanted_v_y: ds 1
 player_body_spawn_type: ds 1
+tail_v_x: ds 1
+tail_v_y: ds 1
 `;
 
 export { init, instructions, readWriteData };

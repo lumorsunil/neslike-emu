@@ -8,7 +8,6 @@ const ModuleCollection = @import("module.zig").ModuleCollection;
 // TODO: Universal background color layer (each tile's palette color 0)
 // TODO: Background tile transparency (color 0)
 // TODO: Sprite layers (behind/in front of background tiles)
-// TODO: Sprite flip
 pub const Graphics = struct {
     rdy: u1 = 1,
     /// memory:             0x0000 - 0x2FFF
@@ -45,75 +44,75 @@ pub const Graphics = struct {
         .init(0x2620), // vsync
     }),
 
-    const screen_scale = 2;
+    // const screen_scale = 2;
     const screen_src = rl.Rectangle.init(0, 0, 256, -256);
-    const screen_dst = rl.Rectangle.init(UI.screen_size[0] - 256 * screen_scale, 0, 256 * screen_scale, 256 * screen_scale);
+    // const screen_dst = rl.Rectangle.init(UI.screen_size[0] - 256 * screen_scale, 0, 256 * screen_scale, 256 * screen_scale);
 
     const master_palette = [64]rl.Color{
-        .init(0x54, 0x54, 0x54, 0xFF), // (84, 84, 84) — Medium Dark Gray
-        .init(0x00, 0x1D, 0x74, 0xFF), // (0, 29, 116) — Deep Blue
-        .init(0x00, 0x0F, 0x97, 0xFF), // (0, 15, 151) — Dark Blue
-        .init(0x34, 0x00, 0x8E, 0xFF), // (52, 0, 142) — Dark Purple
-        .init(0x50, 0x00, 0x67, 0xFF), // (80, 0, 103) — Dark Magenta
-        .init(0x5E, 0x00, 0x26, 0xFF), // (94, 0, 38) — Dark Red-Magenta
-        .init(0x4F, 0x0D, 0x00, 0xFF), // (79, 13, 0) — Dark Red (Maroon)
-        .init(0x38, 0x20, 0x00, 0xFF), // (56, 32, 0) — Dark Orange / Brown
-        .init(0x1D, 0x32, 0x00, 0xFF), // (29, 50, 0) — Dark Olive Green
-        .init(0x00, 0x3E, 0x00, 0xFF), // (0, 62, 0) — Dark Green
-        .init(0x00, 0x3F, 0x00, 0xFF), // (0, 63, 0) — Dark Lime Green
-        .init(0x00, 0x37, 0x21, 0xFF), // (0, 55, 33) — Dark Teal
-        .init(0x00, 0x2D, 0x59, 0xFF), // (0, 45, 89) — Dark Cyan
-        .init(0x00, 0x00, 0x00, 0xFF), // (0, 0, 0) — "Blacker than Black" (Unsafe code; can distort old CRT signals)
-        .init(0x00, 0x00, 0x00, 0xFF), // (0, 0, 0) — Black
-        .init(0x00, 0x00, 0x00, 0xFF), // (0, 0, 0) — Black
-        .init(0x92, 0x92, 0x92, 0xFF), // (146, 146, 146) — Medium Gray
-        .init(0x00, 0x57, 0xAF, 0xFF), // (0, 87, 175) — Mega Man Blue
-        .init(0x28, 0x38, 0xD6, 0xFF), // (40, 56, 214) — Royal Blue
-        .init(0x5F, 0x19, 0xE3, 0xFF), // (95, 25, 227) — Vibrant Purple
-        .init(0x8E, 0x0E, 0xA8, 0xFF), // (142, 14, 168) — Vibrant Magenta
-        .init(0x9E, 0x14, 0x42, 0xFF), // (158, 20, 66) — Crimson
-        .init(0x92, 0x27, 0x00, 0xFF), // (146, 39, 0) — Mario's Shirt Red
-        .init(0x6F, 0x46, 0x00, 0xFF), // (111, 70, 0) — Dirt / Brick Brown
-        .init(0x4A, 0x5F, 0x00, 0xFF), // (74, 95, 0) — Olive Green
-        .init(0x00, 0x73, 0x00, 0xFF), // (0, 115, 0) — Luigi Green
-        .init(0x00, 0x7B, 0x00, 0xFF), // (0, 123, 0) — Lime Green
-        .init(0x00, 0x74, 0x41, 0xFF), // (0, 116, 65) — Teal / Green
-        .init(0x00, 0x67, 0x8E, 0xFF), // (0, 103, 142) — Cyan
-        .init(0x00, 0x00, 0x00, 0xFF), // (0, 0, 0) — Black
-        .init(0x00, 0x00, 0x00, 0xFF), // (0, 0, 0) — Black
-        .init(0x00, 0x00, 0x00, 0xFF), // (0, 0, 0) — Black
-        .init(0xEC, 0xEC, 0xEC, 0xFF), // (236, 236, 236) — Light Gray / Off-White
-        .init(0x39, 0x95, 0xFE, 0xFF), // (57, 149, 254) — Classic Sky Blue
-        .init(0x6A, 0x73, 0xFF, 0xFF), // (106, 115, 255) — Light Slate Blue
-        .init(0xA5, 0x57, 0xFF, 0xFF), // (165, 87, 255) — Bright Violet
-        .init(0xD8, 0x51, 0xF6, 0xFF), // (216, 81, 246) — Bright Pink
-        .init(0xE6, 0x5A, 0x96, 0xFF), // (230, 90, 150) — Rose Pink
-        .init(0xD9, 0x6D, 0x39, 0xFF), // (217, 109, 57) — Light Red / Orange
-        .init(0xB6, 0x8B, 0x18, 0xFF), // (182, 139, 24) — Sand / Gold
-        .init(0x8A, 0x9F, 0x00, 0xFF), // (138, 159, 0) — Yellow-Green
-        .init(0x49, 0xB9, 0x00, 0xFF), // (73, 185, 0) — Bright Lime
-        .init(0x24, 0xC7, 0x2B, 0xFF), // (36, 199, 43) — Bright Green
-        .init(0x1C, 0xC2, 0x74, 0xFF), // (28, 194, 116) — Bright Mint
-        .init(0x1E, 0xB2, 0xBA, 0xFF), // (30, 178, 186) — Bright Turquoise
-        .init(0x42, 0x42, 0x42, 0xFF), // (66, 66, 66) — Dark Charcoal Gray
-        .init(0x00, 0x00, 0x00, 0xFF), // (0, 0, 0) — Black
-        .init(0x00, 0x00, 0x00, 0xFF), // (0, 0, 0) — Black
-        .init(0xFF, 0xFF, 0xFF, 0xFF), // (255, 255, 255) — Pure White
-        .init(0xA4, 0xCE, 0xFE, 0xFF), // (164, 206, 254) — Pale Blue
-        .init(0xB8, 0xBF, 0xFE, 0xFF), // (184, 191, 254) — Pale Lavender
-        .init(0xD2, 0xAF, 0xFD, 0xFF), // (210, 175, 253) — Pale Purple
-        .init(0xE6, 0xA6, 0xFE, 0xFF), // (230, 166, 254) — Pale Magenta
-        .init(0xED, 0xA8, 0xD1, 0xFF), // (237, 168, 209) — Pale Pink
-        .init(0xE7, 0xBC, 0xA2, 0xFF), // (231, 188, 162) — Peach / Light Skin Tone
-        .init(0xD9, 0xCC, 0x9F, 0xFF), // (217, 204, 159) — Pale Yellow / Tan
-        .init(0xC6, 0xD8, 0x97, 0xFF), // (198, 216, 151) — Pale Sage Green
-        .init(0xAE, 0xDF, 0xA3, 0xFF), // (174, 223, 163) — Pale Mint Green
-        .init(0xA0, 0xE4, 0xB7, 0xFF), // (160, 228, 183) — Pale Aqua
-        .init(0x9E, 0xE2, 0xD9, 0xFF), // (158, 226, 217) — Pale Ice Blue
-        .init(0x9D, 0xDC, 0xF0, 0xFF), // (157, 220, 240) — Pale Sky Blue
-        .init(0xB4, 0xB4, 0xB4, 0xFF), // (180, 180, 180) — Silver / Pale Gray
-        .init(0x00, 0x00, 0x00, 0xFF), // (0, 0, 0) — Black
-        .init(0x00, 0x00, 0x00, 0xFF), // (0, 0, 0) — Black
+        .init(0x54, 0x54, 0x54, 0xFF), //  0 (84, 84, 84) — Medium Dark Gray
+        .init(0x00, 0x1D, 0x74, 0xFF), //  1 (0, 29, 116) — Deep Blue
+        .init(0x00, 0x0F, 0x97, 0xFF), //  2 (0, 15, 151) — Dark Blue
+        .init(0x34, 0x00, 0x8E, 0xFF), //  3 (52, 0, 142) — Dark Purple
+        .init(0x50, 0x00, 0x67, 0xFF), //  4 (80, 0, 103) — Dark Magenta
+        .init(0x5E, 0x00, 0x26, 0xFF), //  5 (94, 0, 38) — Dark Red-Magenta
+        .init(0x4F, 0x0D, 0x00, 0xFF), //  6 (79, 13, 0) — Dark Red (Maroon)
+        .init(0x38, 0x20, 0x00, 0xFF), //  7 (56, 32, 0) — Dark Orange / Brown
+        .init(0x1D, 0x32, 0x00, 0xFF), //  8 (29, 50, 0) — Dark Olive Green
+        .init(0x00, 0x3E, 0x00, 0xFF), //  9 (0, 62, 0) — Dark Green
+        .init(0x00, 0x3F, 0x00, 0xFF), // 10 (0, 63, 0) — Dark Lime Green
+        .init(0x00, 0x37, 0x21, 0xFF), // 11 (0, 55, 33) — Dark Teal
+        .init(0x00, 0x2D, 0x59, 0xFF), // 12 (0, 45, 89) — Dark Cyan
+        .init(0x00, 0x00, 0x00, 0xFF), // 13 (0, 0, 0) — "Blacker than Black" (Unsafe code; can distort old CRT signals)
+        .init(0x00, 0x00, 0x00, 0xFF), // 14 (0, 0, 0) — Black
+        .init(0x00, 0x00, 0x00, 0xFF), // 15 (0, 0, 0) — Black
+        .init(0x92, 0x92, 0x92, 0xFF), // 16 (146, 146, 146) — Medium Gray
+        .init(0x00, 0x57, 0xAF, 0xFF), // 17 (0, 87, 175) — Mega Man Blue
+        .init(0x28, 0x38, 0xD6, 0xFF), // 18 (40, 56, 214) — Royal Blue
+        .init(0x5F, 0x19, 0xE3, 0xFF), // 19 (95, 25, 227) — Vibrant Purple
+        .init(0x8E, 0x0E, 0xA8, 0xFF), // 20 (142, 14, 168) — Vibrant Magenta
+        .init(0x9E, 0x14, 0x42, 0xFF), // 21 (158, 20, 66) — Crimson
+        .init(0x92, 0x27, 0x00, 0xFF), // 22 (146, 39, 0) — Mario's Shirt Red
+        .init(0x6F, 0x46, 0x00, 0xFF), // 23 (111, 70, 0) — Dirt / Brick Brown
+        .init(0x4A, 0x5F, 0x00, 0xFF), // 24 (74, 95, 0) — Olive Green
+        .init(0x00, 0x73, 0x00, 0xFF), // 25 (0, 115, 0) — Luigi Green
+        .init(0x00, 0x7B, 0x00, 0xFF), // 26 (0, 123, 0) — Lime Green
+        .init(0x00, 0x74, 0x41, 0xFF), // 27 (0, 116, 65) — Teal / Green
+        .init(0x00, 0x67, 0x8E, 0xFF), // 28 (0, 103, 142) — Cyan
+        .init(0x00, 0x00, 0x00, 0xFF), // 29 (0, 0, 0) — Black
+        .init(0x00, 0x00, 0x00, 0xFF), // 30 (0, 0, 0) — Black
+        .init(0x00, 0x00, 0x00, 0xFF), // 31 (0, 0, 0) — Black
+        .init(0xEC, 0xEC, 0xEC, 0xFF), // 32 (236, 236, 236) — Light Gray / Off-White
+        .init(0x39, 0x95, 0xFE, 0xFF), // 33 (57, 149, 254) — Classic Sky Blue
+        .init(0x6A, 0x73, 0xFF, 0xFF), // 34 (106, 115, 255) — Light Slate Blue
+        .init(0xA5, 0x57, 0xFF, 0xFF), // 35 (165, 87, 255) — Bright Violet
+        .init(0xD8, 0x51, 0xF6, 0xFF), // 36 (216, 81, 246) — Bright Pink
+        .init(0xE6, 0x5A, 0x96, 0xFF), // 37 (230, 90, 150) — Rose Pink
+        .init(0xD9, 0x6D, 0x39, 0xFF), // 38 (217, 109, 57) — Light Red / Orange
+        .init(0xB6, 0x8B, 0x18, 0xFF), // 39 (182, 139, 24) — Sand / Gold
+        .init(0x8A, 0x9F, 0x00, 0xFF), // 40 (138, 159, 0) — Yellow-Green
+        .init(0x49, 0xB9, 0x00, 0xFF), // 41 (73, 185, 0) — Bright Lime
+        .init(0x24, 0xC7, 0x2B, 0xFF), // 42 (36, 199, 43) — Bright Green
+        .init(0x1C, 0xC2, 0x74, 0xFF), // 43 (28, 194, 116) — Bright Mint
+        .init(0x1E, 0xB2, 0xBA, 0xFF), // 44 (30, 178, 186) — Bright Turquoise
+        .init(0x42, 0x42, 0x42, 0xFF), // 45 (66, 66, 66) — Dark Charcoal Gray
+        .init(0x00, 0x00, 0x00, 0xFF), // 46 (0, 0, 0) — Black
+        .init(0x00, 0x00, 0x00, 0xFF), // 47 (0, 0, 0) — Black
+        .init(0xFF, 0xFF, 0xFF, 0xFF), // 48 (255, 255, 255) — Pure White
+        .init(0xA4, 0xCE, 0xFE, 0xFF), // 49 (164, 206, 254) — Pale Blue
+        .init(0xB8, 0xBF, 0xFE, 0xFF), // 50 (184, 191, 254) — Pale Lavender
+        .init(0xD2, 0xAF, 0xFD, 0xFF), // 51 (210, 175, 253) — Pale Purple
+        .init(0xE6, 0xA6, 0xFE, 0xFF), // 52 (230, 166, 254) — Pale Magenta
+        .init(0xED, 0xA8, 0xD1, 0xFF), // 53 (237, 168, 209) — Pale Pink
+        .init(0xE7, 0xBC, 0xA2, 0xFF), // 54 (231, 188, 162) — Peach / Light Skin Tone
+        .init(0xD9, 0xCC, 0x9F, 0xFF), // 55 (217, 204, 159) — Pale Yellow / Tan
+        .init(0xC6, 0xD8, 0x97, 0xFF), // 56 (198, 216, 151) — Pale Sage Green
+        .init(0xAE, 0xDF, 0xA3, 0xFF), // 57 (174, 223, 163) — Pale Mint Green
+        .init(0xA0, 0xE4, 0xB7, 0xFF), // 58 (160, 228, 183) — Pale Aqua
+        .init(0x9E, 0xE2, 0xD9, 0xFF), // 59 (158, 226, 217) — Pale Ice Blue
+        .init(0x9D, 0xDC, 0xF0, 0xFF), // 60 (157, 220, 240) — Pale Sky Blue
+        .init(0xB4, 0xB4, 0xB4, 0xFF), // 61 (180, 180, 180) — Silver / Pale Gray
+        .init(0x00, 0x00, 0x00, 0xFF), // 62 (0, 0, 0) — Black
+        .init(0x00, 0x00, 0x00, 0xFF), // 63 (0, 0, 0) — Black
     };
 
     pub const Addr = std.math.IntFittingRange(0, memory_len - 1);
@@ -204,7 +203,7 @@ pub const Graphics = struct {
         return std.mem.bytesAsSlice(Sprite, self.spriteMap());
     }
 
-    pub fn drawScreen(self: @This()) void {
+    pub fn drawScreen(self: @This(), screen_dst: rl.Rectangle) void {
         self.screen_buffer.texture.drawPro(screen_src, screen_dst, .zero(), 0, .white);
     }
 
@@ -261,8 +260,14 @@ pub const Graphics = struct {
                     const color_index: u6 = @truncate(palette[palette_color]);
                     const color = master_palette[color_index];
 
-                    const x = sprite.x + pixel + tile_data_row_side * 4;
-                    const y = sprite.y + tile_data_row;
+                    var local_x = pixel + tile_data_row_side * 4;
+                    var local_y = tile_data_row;
+
+                    if (sprite.horizontal_flip == 1) local_x = 7 - local_x;
+                    if (sprite.vertical_flip == 1) local_y = 7 - local_y;
+
+                    const x = sprite.x + local_x;
+                    const y = sprite.y + local_y;
 
                     rl.drawPixel(@intCast(x), @intCast(y), color);
                 }

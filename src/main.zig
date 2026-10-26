@@ -68,8 +68,7 @@ fn initEmu(io: std.Io, allocator: Allocator, ctx: *MainContext) !void {
     try initMemoryRenderBuffers(ctx);
     try initTextures(ctx);
     try initAudio(ctx);
-
-    ctx.computer.modules.get(Debug).chip.cpu = &ctx.computer.cpu;
+    initDebugChip(ctx);
 
     drawMemoryRenderBufferBackgrounds(ctx);
 }
@@ -80,22 +79,56 @@ fn deinitEmu(allocator: Allocator, ctx: *MainContext) void {
     rl.closeAudioDevice();
 }
 
+fn restartComputer(ctx: *MainContext) void {
+    ctx.is_continuing = false;
+    restartCpuChip(ctx);
+    restartStartupChip(ctx);
+    restartMemoryChip(ctx);
+    restartDriveChip(ctx);
+    restartRandomizerChip(ctx);
+    restartGraphicsChip(ctx);
+    restartAudio(ctx);
+    restartDebugChip(ctx);
+
+    drawMemoryRenderBufferBackgrounds(ctx);
+}
+
+fn restartCpuChip(ctx: *MainContext) void {
+    ctx.computer.cpu = .{};
+}
+
 fn initStartupChip(ctx: *MainContext) void {
+    restartStartupChip(ctx);
+}
+
+fn restartStartupChip(ctx: *MainContext) void {
     ctx.computer.modules.get(Startup).chip.memory[0] = 0x00;
     ctx.computer.modules.get(Startup).chip.memory[1] = 0xD0;
 }
 
 fn initMemoryChip(ctx: *MainContext) void {
+    restartMemoryChip(ctx);
+}
+
+fn restartMemoryChip(ctx: *MainContext) void {
     ctx.random.interface().bytes(&ctx.computer.modules.get(Memory).chip.memory);
 }
 
 fn initDriveChip(ctx: *MainContext) void {
+    restartDriveChip(ctx);
+}
+
+fn restartDriveChip(ctx: *MainContext) void {
     for (0..ctx.file.len) |i| {
         ctx.computer.modules.get(Drive).chip.memory[i] = ctx.file[i];
     }
 }
 
 fn initRandomizerChip(ctx: *MainContext) void {
+    restartRandomizerChip(ctx);
+}
+
+fn restartRandomizerChip(ctx: *MainContext) void {
     ctx.computer.modules.get(Randomizer).chip.random = .init(ctx.random.interface().int(u64));
 }
 
@@ -105,20 +138,27 @@ fn initGraphicsChip(ctx: *MainContext) !void {
     graphics.chip.screen_buffer = try rl.loadRenderTexture(256, 256);
     graphics.chip.background_layer_buffer = try rl.loadRenderTexture(256, 256);
 
+    restartGraphicsChip(ctx);
+}
+
+fn restartGraphicsChip(ctx: *MainContext) void {
+    const graphics = ctx.computer.modules.get(Graphics);
     ctx.random.interface().bytes(&graphics.chip.memory);
-    // for (graphics.chip.tileData()[0..16], 0..) |*b, i| {
-    //     b.* = tile[i % 16];
-    // }
-    // for (graphics.chip.tileData()[16..32], 0..) |*b, i| {
-    //     b.* = tile2[i % 16];
-    // }
-    // for (graphics.chip.tilePaletteMap()) |*b| {
-    //     b.* = 0;
-    // }
-    // for (0..graphics.chip.tileMap().len) |i| {
-    //     const data: u8 = if (i < graphics.chip.tileMap().len / 2) 0 else 1;
-    //     try graphics.chip.write(@truncate(i), data);
-    // }
+
+    drawRandomPixels(ctx, graphics.chip.screen_buffer);
+    drawRandomPixels(ctx, graphics.chip.background_layer_buffer);
+}
+
+fn drawRandomPixels(ctx: *MainContext, render_texture: rl.RenderTexture2D) void {
+    render_texture.begin();
+    for (0..@intCast(render_texture.texture.width)) |x| {
+        for (0..@intCast(render_texture.texture.height)) |y| {
+            const r = ctx.random.interface().int(u8);
+            const color = rl.Color.init(r, r, r, 0xFF);
+            rl.drawPixel(@intCast(x), @intCast(y), color);
+        }
+    }
+    render_texture.end();
 }
 
 fn initTextures(ctx: *MainContext) !void {
@@ -156,10 +196,23 @@ fn initAudio(ctx: *MainContext) !void {
     Audio.self_ = &audio.chip;
     rl.setAudioStreamCallback(audio.chip.audio_stream, Audio.audioStreamCallback);
     // rl.attachAudioStreamProcessor(audio.chip.audio_stream, Audio.audioStreamCallback);
-    audio.chip.initMemory();
     ctx.random.interface().bytes(&audio.chip.noise_lut);
     rl.playAudioStream(audio.chip.audio_stream);
     rl.setMasterVolume(0.5);
+    restartAudio(ctx);
+}
+
+fn restartAudio(ctx: *MainContext) void {
+    const audio = ctx.computer.modules.get(Audio);
+    audio.chip.initMemory();
+}
+
+fn initDebugChip(ctx: *MainContext) void {
+    restartDebugChip(ctx);
+}
+
+fn restartDebugChip(ctx: *MainContext) void {
+    ctx.computer.modules.get(Debug).chip.cpu = &ctx.computer.cpu;
 }
 
 fn initMemoryRenderBuffers(ctx: *MainContext) !void {
@@ -201,6 +254,7 @@ fn drawMemoryRenderBufferBackgrounds(ctx: *MainContext) void {
 
 const MainContext = struct {
     is_continuing: bool = false,
+    is_fullscreen: bool = true,
     file: []const u8,
     random: std.Random.IoSource,
     computer: Computer = .{},
@@ -267,43 +321,56 @@ const MainContext = struct {
 fn loop(ctx: *MainContext) !void {
     ctx.time.begin();
     defer ctx.time.end();
-    // defer ctx.frame_count +%= 1;
 
-    // if (ctx.frame_count % 3 != 0) {
-    //     try updateAudio(ctx);
-    //     return;
-    // }
-
-    try updateEmuControls(ctx);
+    switch (try updateEmuControls(ctx)) {
+        .cont => {},
+        .restart => {
+            restartComputer(ctx);
+            return;
+        },
+    }
     updateMemoryRenderBuffers(ctx);
 
     rl.beginDrawing();
     rl.clearBackground(.black);
 
-    const graphics = ctx.computer.modules.get(Graphics);
-    graphics.chip.drawScreen();
-
     drawCpu(ctx.computer);
     try drawController(ctx.computer, ctx.textures);
     drawMemory(ctx);
+
+    const graphics = ctx.computer.modules.get(Graphics);
+    const screen_scale: f32 = if (ctx.is_fullscreen) 4 else 2;
+    const screen_dst = rl.Rectangle.init(UI.screen_size[0] - 256 * screen_scale, 0, 256 * screen_scale, 256 * screen_scale);
+    graphics.chip.drawScreen(screen_dst);
 
     rl.drawFPS(5, UI.screen_size[1] - 20);
 
     rl.endDrawing();
 }
 
-fn updateAudio(ctx: *MainContext) !void {
-    _ = ctx;
-    // try ctx.computer.modules.get(Audio).chip.stepFrame();
-}
+const EmuEvent = enum { cont, restart };
 
-fn updateEmuControls(ctx: *MainContext) !void {
+fn updateEmuControls(ctx: *MainContext) !EmuEvent {
+    if (rl.isKeyPressed(.r)) {
+        return .restart;
+    }
+
+    if (rl.isKeyPressed(.f11)) {
+        ctx.is_fullscreen = !ctx.is_fullscreen;
+    }
+
     if (ctx.is_continuing) {
         if (rl.isKeyPressed(.f5)) {
             ctx.is_continuing = false;
         } else {
             for (0..Computer.clock_cycles_per_frame) |_| {
                 try ctx.computer.step();
+                const debug = &ctx.computer.modules.get(Debug).chip;
+                if (debug.is_stop) {
+                    ctx.is_continuing = false;
+                    debug.is_stop = false;
+                    break;
+                }
             }
             try ctx.computer.stepFrame();
         }
@@ -311,10 +378,23 @@ fn updateEmuControls(ctx: *MainContext) !void {
         if (rl.isKeyPressed(.f10)) {
             try ctx.computer.step();
         }
+        if (rl.isKeyPressed(.f9)) {
+            for (0..Computer.clock_cycles_per_frame) |_| {
+                try ctx.computer.step();
+                const debug = &ctx.computer.modules.get(Debug).chip;
+                if (debug.is_stop) {
+                    debug.is_stop = false;
+                    break;
+                }
+            }
+            try ctx.computer.stepFrame();
+        }
         if (rl.isKeyPressed(.f5)) {
             ctx.is_continuing = true;
         }
     }
+
+    return .cont;
 }
 
 fn updateMemoryRenderBuffers(ctx: *MainContext) void {
