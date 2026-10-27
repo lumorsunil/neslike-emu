@@ -1,5 +1,8 @@
 import { asm } from "./asm.js";
 import * as constants from "./constants.js";
+import * as controls from "./controls.js";
+import * as logic from "./logic.js";
+import * as graphics from "./graphics.js";
 
 const tilePatternIndexOf = (x, y) => {
     const i = (x + y * 32) + constants.TPATM;
@@ -79,6 +82,13 @@ ${initPlayerBody()}
     sta under_tail_x
     lda #2
     sta tail_pattern
+
+; init growing
+    lda #0
+    sta growing
+; init is_game_over
+    lda #0
+    sta is_game_over
 `;
 
 const instructions = () => asm`
@@ -87,13 +97,27 @@ const instructions = () => asm`
 
 .body_spawn:
     SUBROUTINE
+
+    jmp .body_spawn_start
+.escape:
+    jmp .end
+
+.body_spawn_start:
     lda player_x
     and #%111
-    bne .end
+    bne .escape
     lda player_y
     and #%111
-    bne .end
+    bne .escape
 
+; head has reached grid intersection
+
+; handle growing
+    lda growing
+    beq .spawn_body_part
+    dec growing
+
+.spawn_body_part:
     lda #1
     sta temp+1
     lda #0
@@ -118,7 +142,118 @@ const instructions = () => asm`
     ldy #0
     sta (temp),y ; TPATM[ grid_i ] = 1
 
+.check_death:
+    lda temp
+    sta temp2
+    lda temp+1
+    sta temp2+1
+
+.check_death_v_x_pos:
+    ; if (player_v_x > 0) check (temp + 1) % 32
+    lda player_v_x
+    beq .check_death_v_y_pos
+    bmi .check_death_v_x_neg
+    lda temp2
+    clc
+    adc #1
+    and #%00011111
+    tax
+    lda temp2
+    and #%11100000
+    sta temp2
+    txa
+    clc
+    adc temp2
+    sta temp2
+    jmp .check_death_tile
+
+.check_death_v_x_neg:
+    ; else if (player_v_x < 0) check temp - 1
+    ; true
+    lda temp2
+    sec
+    sbc #1
+    and #%00011111
+    tax
+    lda temp2
+    and #%11100000
+    sta temp2
+    txa
+    clc
+    adc temp2
+    sta temp2
+    jmp .check_death_tile
+
+.check_death_v_y_pos:
+    ; else if (player_v_y > 0) check (temp + 32) % 0x3ff
+
+    ; x = 0b0000_0000_0001_1111
+    ; y = 0b0000_0011_1110_0000
+
+    ; y+1 = 0b0000_0000_001a_bcde
+    ; 0b0000_0001_000a_bcde
+
+    lda player_v_y
+    bmi .check_death_v_y_neg
+    lda temp2
+    clc
+    adc #32
+    sta temp2
+    lda #0
+    adc temp2+1 ; temp2.hi += carry
+    and #%11    ; temp2.hi %= 0b11
+    clc
+    adc #(TPATM >> 8)
+    sta temp2+1
+
+    jmp .check_death_tile
+
+.check_death_v_y_neg:
+    ; else if (player_v_y < 0) check temp - 32
+    ; true
+    lda temp2 ; 0b0000_00yy_yyyx_xxxx
+    sec
+    sbc #32
+    sta temp2
+    lda temp2+1
+    sbc #0
+    and #%11
+    clc
+    adc #(TPATM >> 8)
+    sta temp2+1
+
+.check_death_tile:
+    ldy #0
+    lda (temp2),y
+    beq .check_death_end
+    ; GAME OVER
+    lda #1
+    sta is_game_over
+    jmp game_over
+
+    ; 0,0 - 1,0 = 31,0
+    ; 0,0 - 0,1 = 0,31
+    ;
+    ; x = +-1
+    ; y = +-32
+    ;
+    ; 0,0 = 0x0000
+    ; 1,0 = 0x0001
+    ; 0,1 = 0x0020
+    ; 0,2 = 0x0040
+    ;
+    ; i: 0 - 1 ==> 0x0000 - 1 = 0xFFFF ==> 0x03FF = (0xFFFF & 0b0000_0011_1111_1111)
+    ; i: 0 - 32 ==> 0x0000 - 32 = 0xFFE0 ==> 0x03FF = (0xFFFF & 0b0000_0011_1111_1111)
+    ;
+    ; i: 0x3FF + 1 ==> 0x0400 ==> 0x0000 = (0x0400 & 0b0000_0011_1111_1111)
+    ; i: 0x3FF + 32 ==> 0x041f ==> 0x001f = (0x041f & 0b0000_0011_1111_1111)
+    ;
+    ; column - 1 = (idx & 0xfe0) + ((idx + 31) & 0x1f)
+
+.check_death_end:
+
 .update_palette:
+    ldy #0
     sty temp+2
                ; temp    = gfed_cba9 8765_4321
     lsr temp+1 ; temp.hi = 0gfe_dcba -->
@@ -215,7 +350,7 @@ BODY_PALETTE EQU %01010101
 
 .handle_tail_turn:
     lda is_body_pattern_straight,x
-    bne .end
+    bne .handle_tail_turn_end
 
     lda tail_v_x
     beq .handle_tail_turn_horizontal
@@ -290,7 +425,11 @@ BODY_PALETTE EQU %01010101
     lda player_y
     cmp apple_y
     bne .end
+; apple eaten
     jsr spawn_apple
+    lda growing
+    adc #PLAYER_GROWTH_PER_APPLE
+    sta growing
 .end:
 
 .update_head_pos:
@@ -309,6 +448,8 @@ BODY_PALETTE EQU %01010101
 
 .update_tail_pos:
     SUBROUTINE
+    lda growing
+    bne .end
     clc
     lda tail_x
     adc tail_v_x
@@ -322,7 +463,10 @@ BODY_PALETTE EQU %01010101
 .end:
 `;
 
-const readWriteData = () => asm``;
+const readWriteData = () => asm`
+growing: ds 1
+is_game_over: ds 1
+`;
 
 // top_left     = 00
 // bottom_left  = 01
@@ -372,4 +516,48 @@ is_body_pattern_straight:
     byte 1, 0, 0, 0, 0, 1, 1
 `;
 
-export { init, instructions, readWriteData, readOnlyData };
+const displayGameOver = () => {
+    const gameOver = constants.STRING("GAME OVER");
+    const y = 16;
+
+    return gameOver.map((c, i) => asm`
+    lda #${c}
+    sta ${constants.TPATM + (i + 10 + y * 32)}
+    `).join('');
+};
+
+const subroutines = () => asm`
+game_over:
+    SUBROUTINE
+${displayGameOver()}
+.input_check:
+    lda INP1_PRESSED
+    and #BUTTON_A
+    bne .restart
+    jmp .input_check
+.restart:
+    jsr restart
+    jmp frame
+
+restart:
+    SUBROUTINE
+${controls.init()}
+${logic.init()}
+
+    lda tail_attr
+    and #%11110011
+    sta tail_attr
+    lda #2
+    sta tail_pattern
+    lda player_attr
+    and #%11110011
+    sta player_attr
+    lda #0
+    sta player_pattern
+
+    jsr init_board
+    jsr spawn_apple
+    rts
+`;
+
+export { init, instructions, readWriteData, readOnlyData, subroutines };

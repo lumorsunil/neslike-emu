@@ -1,10 +1,11 @@
 )§
-utils = await import("./pp-utils.js")
+utils = await import("./utils.js")
 controls = await import("./controls.js")
 music = await import("./music.js")
 graphics = await import("./graphics.js")
 objects = await import("./objects.js")
 logic = await import("./logic.js")
+font = await import("./font.js")
 )§
 
     processor 6502
@@ -12,8 +13,8 @@ logic = await import("./logic.js")
     seg.u variables
 ram:
     org $0000
-temp:
-    ds 3
+temp: ds 3
+temp2: ds 3
 )§ emit(controls.readWriteData()) )§
 )§ emit(logic.readWriteData()) )§
 
@@ -36,9 +37,6 @@ main:
     lda #0
     sta $FFFF
 
-; TODO: Snake body
-;   TODO: Eating an apple increases body size
-; TODO: Game over
 ; TODO: Score
 ; TODO: Sound effects
 frame:
@@ -53,6 +51,8 @@ end:
 
 subroutines:
 )§ emit(objects.subroutines()) )§
+)§ emit(graphics.subroutines()) )§
+)§ emit(logic.subroutines()) )§
 
     seg rom
     org $E000

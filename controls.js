@@ -33,6 +33,7 @@ controls:
 
 
 PLAYER_SPEED EQU 2
+PLAYER_GROWTH_PER_APPLE EQU 2
 
 .update_controls_hold:
     lda INP1_DOWN

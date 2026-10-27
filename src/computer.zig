@@ -87,5 +87,34 @@ pub const Computer = struct {
         }
     }
 
-    pub const Error = error{} || MOS6502.Error || Graphics.Error;
+    pub fn read(self: *@This(), addr: u16) Error!u8 {
+        inline for (&self.modules.modules) |*module| {
+            const has_read = comptime std.meta.hasMethod(@TypeOf(module.chip), "read");
+
+            if (!has_read) {
+                std.log.err("invalid read addr: 0x{x:04}", .{addr});
+                return Error.InvalidReadAddr;
+            }
+
+            if (module.isMapped(addr)) |rel_addr| {
+                return try module.chip.read(rel_addr);
+            }
+        }
+    }
+
+    pub fn write(self: *@This(), addr: u16, data: u8) Error!void {
+        inline for (&self.modules.modules) |*module| {
+            const has_write = comptime std.meta.hasMethod(@TypeOf(module.chip), "write");
+
+            if (!has_write) return Error.InvalidWriteAddr;
+
+            if (module.isMapped(addr)) |rel_addr| {
+                return try module.chip.write(rel_addr, data);
+            }
+        }
+    }
+
+    pub const Error = error{
+        InvalidReadAddr,
+    } || MOS6502.Error || Graphics.Error;
 };

@@ -1,5 +1,14 @@
 import { asm } from "./asm.js";
 
+const tile = (ml) => ml.trim().split('\n').map(line => {
+    const left = line.slice(0, 4).split('').reverse();
+    const right = line.slice(4).split('').reverse();
+
+    const toByte = (b) => b.map(color => (+color).toString(2).padStart(2, '0')).join('');
+
+    return `    byte %${toByte(left)}, %${toByte(right)}`;
+}).join('\n');
+
 const mkNote = (freq) => {
   const s = freq.toString().split(".");
   const int = +s[0];
@@ -183,4 +192,4 @@ const intersperse = (arr, delim) =>
     return index === 0 ? [curr] : [...acc, delim, curr];
   }, []);
 
-export { mkNote, notes, noteTable, intersperse };
+export { tile, mkNote, notes, noteTable, intersperse };

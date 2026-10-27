@@ -64,7 +64,7 @@ init_player:
     lda #4
     sta under_tail_pattern
     sta under_head_pattern
-init_apply_data:
+init_apple_data:
     lda apple_attr
     ora #$21 ; enabled | palette = 1
     sta apple_attr

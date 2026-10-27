@@ -4,6 +4,7 @@ const rl = @import("raylib");
 const UI = @import("ui.zig");
 const Module = @import("module.zig").Module;
 const ModuleCollection = @import("module.zig").ModuleCollection;
+const DirectMemoryAccess = @import("dma.zig").DirectMemoryAccess;
 
 // TODO: Universal background color layer (each tile's palette color 0)
 // TODO: Background tile transparency (color 0)
@@ -18,12 +19,15 @@ pub const Graphics = struct {
     /// tile data:          0x0520 - 0x151f  (256 * 8 * 8 * 2bits) (256 * 16bytes)
     /// sprite data:        0x1520 - 0x251f  (256 * 8 * 8 * 2bits) (256 * 16bytes)
     /// sprites             0x2520 - 0x261f  (64 * 32bits)
-    /// vsync               0x2620
+    /// tile data pointer:  0x2620 - 0x2621
+    /// sprite data pointer:0x2622 - 0x2623
+    /// vsync               0x2624
     memory: [memory_len - virtual_memory_len]u8 = undefined,
     // sprites: [sprites_len]Sprite = undefined,
     screen_buffer: rl.RenderTexture2D = undefined,
     background_layer_buffer: rl.RenderTexture2D = undefined,
     background_render_queue: std.bit_set.ArrayBitSet(usize, tiles_len) = .empty,
+    dma: DirectMemoryAccess = undefined,
     modules: ModuleCollection(.{
         TilePatternMap,
         TilePaletteMap,
@@ -32,6 +36,8 @@ pub const Graphics = struct {
         TileData,
         SpriteData,
         SpriteMap,
+        TileDataPointer,
+        SpriteDataPointer,
         VsyncModule,
     }) = .init(.{
         .init(0), // tile pattern map
@@ -41,7 +47,9 @@ pub const Graphics = struct {
         .init(0x0520), // tile data
         .init(0x1520), // sprite data
         .init(0x2520), // sprite map
-        .init(0x2620), // vsync
+        .init(0x2620), // tile data pointer
+        .init(0x2622), // sprite data pointer
+        .init(0x2624), // vsync
     }),
 
     // const screen_scale = 2;
@@ -116,8 +124,8 @@ pub const Graphics = struct {
     };
 
     pub const Addr = std.math.IntFittingRange(0, memory_len - 1);
-    pub const memory_len = 12288 + virtual_memory_len;
-    const vsync = 0x2620;
+    pub const memory_len = 12292 + virtual_memory_len;
+    const vsync = 0x2624;
     const virtual_memory_len = 1;
     const sprites_len = 64;
     const tile_cols = 32;
@@ -219,10 +227,16 @@ pub const Graphics = struct {
         const pi = @divFloor(i, 4);
         const tile_palette_index: u2 = @truncate(self.tilePaletteMap()[pi] >> @truncate((i % 4) * 2));
         const tile_palette = self.tilePalettes()[@as(u16, tile_palette_index) * 4 .. @as(u16, tile_palette_index) * 4 + 4];
+        const tile_data_pointer = self.getModule(.tileDataPointer);
 
         for (0..8) |tile_data_row| {
             for (0..2) |tile_data_row_side| {
-                const data = self.tileData()[@as(u16, tile_index) * 16 + tile_data_row * 2 + tile_data_row_side];
+                // const data = self.tileData()[@as(u16, tile_index) * 16 + tile_data_row * 2 + tile_data_row_side];
+                const tile_data_pointer_mem = tile_data_pointer.memory_map.slice(&self.memory);
+                const addr_lo: u16 = tile_data_pointer_mem[0];
+                const addr_hi: u16 = tile_data_pointer_mem[1];
+                const addr_offset: u16 = @as(u16, tile_index) * 16 + @as(u16, @intCast(tile_data_row)) * 2 + @as(u16, @intCast(tile_data_row_side));
+                const data = self.dma.read(addr_lo + (addr_hi << 8) + addr_offset) catch unreachable;
 
                 for (0..4) |pixel| {
                     const palette_color: u2 = @truncate(data >> @truncate(pixel * 2));
@@ -249,10 +263,16 @@ pub const Graphics = struct {
         const pw = 4;
         const pi = @as(u16, sprite.palette);
         const palette = self.spritePalettes()[pi * pw .. pi * pw + pw];
+        const sprite_data_pointer = self.getModule(.spriteDataPointer);
+        const sprite_data_pointer_mem = sprite_data_pointer.memory_map.slice(&self.memory);
 
         for (0..8) |tile_data_row| {
             for (0..2) |tile_data_row_side| {
-                const data = self.spriteData()[@as(u16, sprite.tile_index) * 16 + tile_data_row * 2 + tile_data_row_side];
+                // const data = self.spriteData()[@as(u16, sprite.tile_index) * 16 + tile_data_row * 2 + tile_data_row_side];
+                const addr_lo: u16 = sprite_data_pointer_mem[0];
+                const addr_hi: u16 = sprite_data_pointer_mem[1];
+                const addr_offset: u16 = @as(u16, sprite.tile_index) * 16 + @as(u16, @intCast(tile_data_row)) * 2 + @as(u16, @intCast(tile_data_row_side));
+                const data = self.dma.read(addr_lo + (addr_hi << 8) + addr_offset) catch unreachable;
 
                 for (0..4) |pixel| {
                     const palette_color: u2 = @truncate(data >> @truncate(pixel * 2));
@@ -275,7 +295,7 @@ pub const Graphics = struct {
         }
     }
 
-    const SubModuleTag = enum { tilePatternMap, spriteMap, tilePaletteMap, tileData, spriteData, spritePaletteData, tilePaletteData };
+    const SubModuleTag = enum { tilePatternMap, spriteMap, tilePaletteMap, tileData, spriteData, spritePaletteData, tilePaletteData, tileDataPointer, spriteDataPointer };
     const sub_module_map = std.enums.EnumFieldStruct(SubModuleTag, type, null){
         .tilePatternMap = TilePatternMap,
         .spriteMap = SpriteMap,
@@ -284,6 +304,8 @@ pub const Graphics = struct {
         .spriteData = SpriteData,
         .spritePaletteData = SpritePaletteData,
         .tilePaletteData = TilePaletteData,
+        .tileDataPointer = TileDataPointer,
+        .spriteDataPointer = SpriteDataPointer,
     };
 
     pub fn getModule(self: *@This(), comptime sub_module: SubModuleTag) *Module(@field(sub_module_map, @tagName(sub_module))) {
@@ -369,6 +391,8 @@ const SpritePaletteData = WriterModule("SpritePaletteData", 0x0010);
 const TileData = WriterModule("TileData", 0x1000);
 const SpriteData = WriterModule("SpriteData", 0x1000);
 const SpriteMap = WriterModule("SpriteMap", 0x0100);
+pub const TileDataPointer = WriterModule("TileDataPointer", 0x0002);
+pub const SpriteDataPointer = WriterModule("SpriteDataPointer", 0x0002);
 
 const VsyncModule = VirtualModule("Vsync", 1, writeVsync);
 fn writeVsync(ctx: WriteContext) void {

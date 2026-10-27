@@ -9,6 +9,7 @@ const Memory = @import("memory.zig").Memory;
 const Controller = @import("controller.zig").Controller;
 const Startup = @import("startup.zig").Startup;
 const Graphics = @import("graphics.zig").Graphics;
+const TileDataPointer = @import("graphics.zig").TileDataPointer;
 const Audio = @import("audio.zig").Audio;
 const Drive = @import("drive.zig").Drive;
 const Randomizer = @import("randomizer.zig").Randomizer;
@@ -135,6 +136,7 @@ fn restartRandomizerChip(ctx: *MainContext) void {
 fn initGraphicsChip(ctx: *MainContext) !void {
     const graphics = ctx.computer.modules.get(Graphics);
 
+    graphics.chip.dma = .{ .computer = &ctx.computer };
     graphics.chip.screen_buffer = try rl.loadRenderTexture(256, 256);
     graphics.chip.background_layer_buffer = try rl.loadRenderTexture(256, 256);
 
@@ -147,6 +149,11 @@ fn restartGraphicsChip(ctx: *MainContext) void {
 
     drawRandomPixels(ctx, graphics.chip.screen_buffer);
     drawRandomPixels(ctx, graphics.chip.background_layer_buffer);
+
+    graphics.chip.memory[0x2620] = 0x20;
+    graphics.chip.memory[0x2621] = 0x09;
+    graphics.chip.memory[0x2622] = 0x20;
+    graphics.chip.memory[0x2623] = 0x19;
 }
 
 fn drawRandomPixels(ctx: *MainContext, render_texture: rl.RenderTexture2D) void {

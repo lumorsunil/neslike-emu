@@ -1,23 +1,21 @@
 import { asm } from "./asm.js";
+import { tile } from "./utils.js";
+import { font } from "./font.js";
 
 const init = () => asm`
 init_graphics:
 
-init_tile_data:
-    ldx #tile_data_size-1
-tile_data_store:
-    lda tile_data,x
-    sta TDAT,x
-    dex
-    bpl tile_data_store
+.set_tile_data_pointer:
+    lda #<tile_data
+    sta $2a20
+    lda #>tile_data
+    sta $2a21
 
-init_sprite_data:
-    ldx #sprite_data_size-1
-sprite_data_store:
-    lda sprite_data,x
-    sta SDAT,x
-    dex
-    bpl sprite_data_store
+.set_sprite_data_pointer:
+    lda #<sprite_data
+    sta $2a22
+    lda #>sprite_data
+    sta $2a23
 
 init_tile_palette_data:
     ldx #tile_palette_data_size-1
@@ -35,44 +33,7 @@ sprite_palette_data_store:
     dex
     bpl sprite_palette_data_store
 
-init_tile_map:
-    lda #$00
-    ldx #$FF
-init_tile_map_loop_0:
-    sta TPATM,x
-    dex
-    bne init_tile_map_loop_0
-    sta TPATM,x
-
-    ldx #$FF
-init_tile_map_loop_1:
-    sta TPATM+$100,x
-    dex
-    bne init_tile_map_loop_1
-    sta TPATM+$100,x
-
-    ldx #$FF
-init_tile_map_loop_2:
-    sta TPATM+$200,x
-    dex
-    bne init_tile_map_loop_2
-    sta TPATM+$200,x
-
-    ldx #$FF
-init_tile_map_loop_3:
-    sta TPATM+$300,x
-    dex
-    bne init_tile_map_loop_3
-    sta TPATM+$300,x
-
-init_tile_palettes:
-    lda #$00
-    ldx #$FF
-init_tile_palettes_loop:
-    sta TPALM,x
-    dex
-    bne init_tile_palettes_loop
-    sta TPALM,x
+    jsr init_board
 
 init_sprites:
     lda #0
@@ -83,16 +44,6 @@ init_sprites_loop:
     bne init_sprites_loop
     sta SMAP,x
 `;
-
-const swap = (a, b) => asm`${b}, ${a}`;
-const tile = (ml) => ml.trim().split('\n').map(line => {
-    const left = line.slice(0, 4).split('').reverse();
-    const right = line.slice(4).split('').reverse();
-
-    const toByte = (b) => b.map(color => (+color).toString(2).padStart(2, '0')).join('');
-
-    return `    byte %${toByte(left)}, %${toByte(right)}`;
-}).join('\n');
 
 const readOnlyData = () => asm`
 tile_data:    
@@ -131,16 +82,6 @@ ${tile(`
 00000333
 `)}
 ; bottom_right
-${" " || tile(`
-00000000
-00003111
-00311111
-03122211
-03121221
-31122122
-31112212
-31122111
-`)}
 ${tile(`
 00000002
 00003122
@@ -163,16 +104,6 @@ ${tile(`
 31221110
 `)}
 ; horizontal
-${" " || tile(`
-00111100
-11122111
-11222211
-12211221
-22111122
-21111112
-11222211
-22000022
-`)}
 ${tile(`
 11000011
 21111112
@@ -183,6 +114,7 @@ ${tile(`
 33111133
 00333300
 `)}
+${font()}
 tile_data_size = . - tile_data
 
 tile_palette_data:    
@@ -253,4 +185,49 @@ sprite_palette_data:
 sprite_palette_data_size = . - sprite_palette_data
 `;
 
-export { init, readOnlyData };
+const subroutines = () => asm`
+init_board:
+    SUBROUTINE
+.init_tile_map:
+    lda #$00
+    ldx #$FF
+.init_tile_map_loop_0:
+    sta TPATM,x
+    dex
+    bne .init_tile_map_loop_0
+    sta TPATM,x
+
+    ldx #$FF
+.init_tile_map_loop_1:
+    sta TPATM+$100,x
+    dex
+    bne .init_tile_map_loop_1
+    sta TPATM+$100,x
+
+    ldx #$FF
+.init_tile_map_loop_2:
+    sta TPATM+$200,x
+    dex
+    bne .init_tile_map_loop_2
+    sta TPATM+$200,x
+
+    ldx #$FF
+.init_tile_map_loop_3:
+    sta TPATM+$300,x
+    dex
+    bne .init_tile_map_loop_3
+    sta TPATM+$300,x
+
+.init_tile_palettes:
+    lda #$00
+    ldx #$FF
+.init_tile_palettes_loop:
+    sta TPALM,x
+    dex
+    bne .init_tile_palettes_loop
+    sta TPALM,x
+.end:
+    rts
+`;
+
+export { init, readOnlyData, subroutines };
