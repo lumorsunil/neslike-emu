@@ -1,23 +1,24 @@
 import { asm } from "./asm.js";
 
-const instructions = () => " " || asm`
+const instructions = () => asm`
 update_music:
+    SUBROUTINE
     ; dec music_pitch_timer
     ; bne update_music_note
     ; lda #$10
     ; sta music_pitch_timer
     ; dec NOISE_F+1
-update_music_note:
-update_square_waves:
+.update_music_note:
+.update_square_waves:
     dec music_timer_sq
-    bne update_triangle_wave
+    bne .update_triangle_wave
     inc music_state_sq
     lda music_state_sq
     cmp #56
-    bne play_music_note_sq
+    bne .play_music_note_sq
     lda #$00
     sta music_state_sq
-play_music_note_sq:
+.play_music_note_sq:
     tax
     lda music_notes_duration_sq,x
     sta music_timer_sq
@@ -36,16 +37,16 @@ play_music_note_sq:
     sta SQ2_F+1
     lda music_notes_SQ2_F2,x
     sta SQ2_F+2
-update_triangle_wave:
+.update_triangle_wave:
     dec music_timer_tr
-    bne update_noise
+    bne .update_noise
     inc music_state_tr
     lda music_state_tr
     cmp #16
-    bne play_music_note_tr
+    bne .play_music_note_tr
     lda #$00
     sta music_state_tr
-play_music_note_tr:
+.play_music_note_tr:
     tax
     lda music_notes_duration_tr,x
     sta music_timer_tr
@@ -57,16 +58,16 @@ play_music_note_tr:
     sta TR_F+1
     lda music_notes_TR_F2,x
     sta TR_F+2
-update_noise:
+.update_noise:
     dec music_timer_ns
-    bne update_music_end
+    bne .end
     inc music_state_ns
     lda music_state_ns
     cmp #12
-    bne play_music_note_ns
+    bne .play_music_note_ns
     lda #$00
     sta music_state_ns
-play_music_note_ns:
+.play_music_note_ns:
     tax
     lda music_notes_duration_ns,x
     sta music_timer_ns
@@ -80,7 +81,36 @@ play_music_note_ns:
     sta NOISE_F+1
     lda music_notes_NS_F2,x
     sta NOISE_F+2
-update_music_end:
+.end:
+
+update_sound_effects:
+.eat_apple:
+    SUBROUTINE
+    lda se_eat_apple_timer
+    beq .end
+    dec se_eat_apple_timer
+    beq .sound_effect_ended
+    lda #$AF
+    sec
+    sbc se_eat_apple_timer
+    sbc se_eat_apple_timer
+    sta SQ2_F
+    lda se_eat_apple_timer
+    and #%11
+    bne .higher_pitch
+    lda #3
+    jmp .set_hi_freq
+.higher_pitch:
+    lda #7
+.set_hi_freq:
+    sta SQ2_F+1
+    lda #15
+    jmp .set_volume
+.sound_effect_ended:
+    lda #0
+.set_volume:
+    sta SQ2_V
+.end:
 `;
 
 const generateTables = () => {
@@ -180,6 +210,8 @@ const init = () => asm`
     sta music_state_sq+1
     sta music_state_tr+1
     sta music_state_ns+1
+    sta se_eat_apple_timer
+    sta se_game_over_timer
 `;
 
 const readWriteData = () => asm`
@@ -190,10 +222,66 @@ music_pitch_timer: ds 1
 music_state_sq: ds 2
 music_state_tr: ds 2
 music_state_ns: ds 2
+
+se_eat_apple_timer: ds 1
+se_game_over_timer: ds 1
 `;
 
 const readOnlyData = () => asm`
 ${generateTables()}
 `;
 
-export { init, instructions, readWriteData, readOnlyData };
+const subroutines = () => asm`
+update_se_game_over:
+.game_over:
+    SUBROUTINE
+    lda se_game_over_timer
+    beq .end
+    dec se_game_over_timer
+    dec se_game_over_timer
+    dec se_game_over_timer
+    dec se_game_over_timer
+    beq .sound_effect_ended
+    sta SQ2_F
+    and #%111
+    bne .hi_setting_two
+.hi_setting_one:
+    lda #1
+    jmp .hi_setting
+.hi_setting_two:
+    lda SQ2_F
+    and #%11
+    bne .hi_setting_three
+    lda #3
+    jmp .hi_setting
+.hi_setting_three:
+    lda SQ2_F
+    and #%1
+    bne .hi_setting_four
+    lda #5
+    jmp .hi_setting
+.hi_setting_four:
+    lda #7
+.hi_setting:
+    sta SQ2_F+1
+    lda #15
+    jmp .set_volume
+.sound_effect_ended:
+    lda #0
+.set_volume:
+    sta SQ2_V
+.end:
+    rts
+
+turn_off_music:
+    SUBROUTINE
+    lda #0
+    sta SQ1_V
+    sta SQ2_V
+    sta TR_V
+    sta NOISE_V
+.end:
+    rts
+`;
+
+export { init, instructions, readWriteData, readOnlyData, subroutines };

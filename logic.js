@@ -1,4 +1,5 @@
 import { asm } from "./asm.js";
+import { repeat, range } from "./utils.js";
 import * as constants from "./constants.js";
 import * as controls from "./controls.js";
 import * as logic from "./logic.js";
@@ -54,7 +55,7 @@ const setTilePalette = (x, y, palette) => {
 `;
 };
 
-const initPlayerBody = () => [...new Array(constants.PLAYER_BODY_SIZE_INIT)].map((_, i) => {
+const initPlayerBody = () => range(0, constants.PLAYER_BODY_SIZE_INIT).map((i) => {
     const x = 16;
     const y = 32 - 5 - constants.PLAYER_BODY_SIZE_INIT + 1 + i;
 
@@ -89,11 +90,16 @@ ${initPlayerBody()}
 ; init is_game_over
     lda #0
     sta is_game_over
+; init score
+    sta score
+    sta score+1
 `;
 
 const instructions = () => asm`
     SUBROUTINE
 .logic:
+
+    jsr print_score
 
 .body_spawn:
     SUBROUTINE
@@ -199,8 +205,23 @@ const instructions = () => asm`
     clc
     adc #32
     sta temp2
-    lda #0
-    adc temp2+1 ; temp2.hi += carry
+    lda temp2+1
+    and #%11
+    adc #0 ; temp2.hi += carry
+    cmp #%100
+    bne .wrap_pos_end
+
+.wrap_pos:
+    tax
+    lda temp2
+    adc #32
+    sta temp2
+    lda player_y
+    adc #${16 - constants.PLAYER_SPEED}
+    sta player_y
+    txa
+.wrap_pos_end:
+
     and #%11    ; temp2.hi %= 0b11
     clc
     adc #(TPATM >> 8)
@@ -218,14 +239,51 @@ const instructions = () => asm`
     lda temp2+1
     sbc #0
     and #%11
+    tax
+
+    ; temp2.hi == 0
+    bne .wrap_neg_end
+
+    ; temp2.lo == 0
+    lda temp2
+    and #%11100000
+    bne .wrap_neg_end
+
+    ; temp2.hi == 0 && temp2.lo == 0
+.wrap_neg:
+    lda temp2
+    ora #%11100000
+    sta temp2
+    lda player_y
+    sbc #${16 - constants.PLAYER_SPEED}
+    sta player_y
+    ldx #%11
+.wrap_neg_end:
+
     clc
+    txa
     adc #(TPATM >> 8)
     sta temp2+1
+
+; ; DEBUG: check temp2 addr
+;     ldx temp2
+;     ldy temp2+1
+;     lda #0
+;     sta $FFFF
+; ; DEBUG: end
 
 .check_death_tile:
     ldy #0
     lda (temp2),y
     beq .check_death_end
+
+; ; DEBUG: check temp2 addr
+;     ldx temp2
+;     ldy temp2+1
+;     lda #0
+;     sta $FFFF
+; ; DEBUG: end
+
     ; GAME OVER
     lda #1
     sta is_game_over
@@ -415,6 +473,30 @@ BODY_PALETTE EQU %01010101
     and palette_slots,x  ; a &= [slots+x]
     sta (temp),y ; [TPALM + (grid_i / 4)] &= [slots+x]
 
+.update_tail_wrap:
+    lda tail_v_y
+    beq .update_tail_wrap_end
+    bmi .update_tail_wrap_neg
+
+.update_tail_wrap_pos:
+    ; if (tail_y == 8 * 31) tail_y = 8 - speed
+    lda tail_y
+    cmp #31 * 8
+    bne .update_tail_wrap_end
+    lda #8 - PLAYER_SPEED
+    sta tail_y
+    jmp .update_tail_wrap_end
+
+.update_tail_wrap_neg:
+    ; if (tail_y == 8) tail_y = 31 * 8 + speed
+    lda tail_y
+    cmp #8
+    bne .update_tail_wrap_end
+    lda #31 * 8 + PLAYER_SPEED
+    sta tail_y
+
+.update_tail_wrap_end:
+
 .end:
 
 .check_eat_apple:
@@ -430,6 +512,16 @@ BODY_PALETTE EQU %01010101
     lda growing
     adc #PLAYER_GROWTH_PER_APPLE
     sta growing
+    lda #12
+    sta se_eat_apple_timer
+    lda score
+    sed
+    adc #${constants.SCORE_PER_APPLE}
+    sta score
+    lda #0
+    adc score+1
+    sta score+1
+    cld
 .end:
 
 .update_head_pos:
@@ -466,6 +558,7 @@ BODY_PALETTE EQU %01010101
 const readWriteData = () => asm`
 growing: ds 1
 is_game_over: ds 1
+score: ds 2
 `;
 
 // top_left     = 00
@@ -516,25 +609,62 @@ is_body_pattern_straight:
     byte 1, 0, 0, 0, 0, 1, 1
 `;
 
-const displayGameOver = () => {
-    const gameOver = constants.STRING("GAME OVER");
-    const y = 16;
+const tileIndex = (x, y) => asm`${
+    constants.TPATM + x + y * 32
+}`;
 
-    return gameOver.map((c, i) => asm`
+const print = (s, x, y) => {
+    const score = constants.STRING(s);
+
+    return score.map((c, i) => asm`
     lda #${c}
-    sta ${constants.TPATM + (i + 10 + y * 32)}
+    sta ${tileIndex(i + x, y)}
     `).join('');
 };
 
+/// source has to be decimal mode
+const printNumber = (source, n_bytes, x, y) =>
+    repeat(n_bytes, "").map((_, i) => asm`
+    clc
+    lda ${source}${i > 0 ? `+${i}` : ""}
+    and #$0F
+    adc #33
+    sta ${tileIndex(x + (n_bytes - i - 1) * 2 + 1, y)}
+    lda ${source}${i > 0 ? `+${i}` : ""}
+    and #$F0
+    lsr
+    lsr
+    lsr
+    lsr
+    adc #33
+    sta ${tileIndex(x + (n_bytes - i - 1) * 2, y)}
+`).join('');
+
+const displayScore = () => print("SCORE:", 1, 0);
+const displayGameOver = () => print("GAME OVER", 10, 16);
+
 const subroutines = () => asm`
+print_score:
+    SUBROUTINE
+${displayScore()}
+${printNumber("score", 2, 8, 0)}
+    rts
+
 game_over:
     SUBROUTINE
 ${displayGameOver()}
+    jsr turn_off_music
+    lda #$FC
+    sta se_game_over_timer
+.loop:
+    jsr update_se_game_over
+    jsr print_score
 .input_check:
     lda INP1_PRESSED
     and #BUTTON_A
     bne .restart
-    jmp .input_check
+    sta VSYNC
+    jmp .loop
 .restart:
     jsr restart
     jmp frame
@@ -554,10 +684,29 @@ ${logic.init()}
     sta player_attr
     lda #0
     sta player_pattern
+    sta score
+    sta score+1
 
     jsr init_board
     jsr spawn_apple
     rts
 `;
 
-export { init, instructions, readWriteData, readOnlyData, subroutines };
+const hiScoreEntry = () => asm`
+    byte 0, 0, 0 ; letters
+    byte 0, 0    ; score
+    byte 0, 0, 0 ; letters
+`;
+
+const hiScoreIndexEntry = () => asm`
+    byte 0       ; hi_score index
+`;
+
+const persistentData = () => asm`
+hi_scores:
+${repeat(constants.HI_SCORE_LEN, hiScoreEntry()).join('')}
+hi_score_indexed:
+${repeat(constants.HI_SCORE_LEN, hiScoreIndexEntry()).join('')}
+`;
+
+export { init, instructions, readWriteData, readOnlyData, subroutines, persistentData };

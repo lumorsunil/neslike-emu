@@ -1,4 +1,5 @@
 import { asm } from "./asm.js";
+import * as constants from "./constants.js";
 
 const instructions = () => asm`
 controls:
@@ -32,7 +33,7 @@ controls:
 ;     sta player_wanted_v_y
 
 
-PLAYER_SPEED EQU 2
+PLAYER_SPEED EQU ${constants.PLAYER_SPEED}
 PLAYER_GROWTH_PER_APPLE EQU 2
 
 .update_controls_hold:

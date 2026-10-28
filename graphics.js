@@ -1,9 +1,11 @@
 import { asm } from "./asm.js";
 import { tile } from "./utils.js";
 import { font } from "./font.js";
+import { FONT } from "./constants.js";
 
 const init = () => asm`
 init_graphics:
+    SUBROUTINE
 
 .set_tile_data_pointer:
     lda #<tile_data
@@ -17,31 +19,31 @@ init_graphics:
     lda #>sprite_data
     sta $2a23
 
-init_tile_palette_data:
+.init_tile_palette_data:
     ldx #tile_palette_data_size-1
-tile_palette_data_store:
+.tile_palette_data_store:
     lda tile_palette_data,x
     sta TPAL,x
     dex
-    bpl tile_palette_data_store
+    bpl .tile_palette_data_store
 
-init_sprite_palette_data:
+.init_sprite_palette_data:
     ldx #sprite_palette_data_size-1
-sprite_palette_data_store:
+.sprite_palette_data_store:
     lda sprite_palette_data,x
     sta SPAL,x
     dex
-    bpl sprite_palette_data_store
+    bpl .sprite_palette_data_store
 
     jsr init_board
 
-init_sprites:
+.init_sprites:
     lda #0
     ldx #$FF
-init_sprites_loop:
+.init_sprites_loop:
     sta SMAP,x
     dex
-    bne init_sprites_loop
+    bne .init_sprites_loop
     sta SMAP,x
 `;
 
@@ -120,6 +122,7 @@ tile_data_size = . - tile_data
 tile_palette_data:    
     byte 25, 42, 25, 25
     byte 25, 43, 22, 14
+    byte 14, 32, 22, 14
 tile_palette_data_size = . - tile_palette_data
 sprite_data:    
 ; vertical head
@@ -226,6 +229,22 @@ init_board:
     dex
     bne .init_tile_palettes_loop
     sta TPALM,x
+.init_ui_tile_palettes:
+    lda #$AA
+    ldx #$07
+.init_ui_tile_palettes_loop:
+    sta TPALM,x
+    dex
+    bne .init_ui_tile_palettes_loop
+    sta TPALM,x
+.init_ui_tiles:
+    lda #${FONT(' ')}
+    ldx #$1f
+.init_ui_tiles_loop:
+    sta TPATM,x
+    dex
+    bne .init_ui_tiles_loop
+    sta TPATM,x
 .end:
     rts
 `;

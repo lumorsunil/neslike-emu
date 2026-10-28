@@ -1,5 +1,9 @@
 import { asm } from "./asm.js";
 
+const repeat = (n, s) => [...new Array(n)].map(() => s);
+
+const range = (min, max) => [...new Array(max-min + 1)].map((_, i) => i + min);
+
 const tile = (ml) => ml.trim().split('\n').map(line => {
     const left = line.slice(0, 4).split('').reverse();
     const right = line.slice(4).split('').reverse();
@@ -192,4 +196,4 @@ const intersperse = (arr, delim) =>
     return index === 0 ? [curr] : [...acc, delim, curr];
   }, []);
 
-export { tile, mkNote, notes, noteTable, intersperse };
+export { repeat, range, tile, mkNote, notes, noteTable, intersperse };

@@ -9,7 +9,7 @@ pub const Debug = struct {
     pub const memory_len = 1;
 
     pub fn write(self: *@This(), _: Addr, data: u8) Error!void {
-        std.log.debug("{f}", .{MOS6502.formatCpu(self.cpu, .terminal)});
+        std.log.debug("DEBUG: {f}", .{MOS6502.formatCpu(self.cpu, .terminal)});
         if (data == 0) {
             self.is_stop = true;
         }
