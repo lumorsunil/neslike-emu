@@ -17,3 +17,6 @@ pub const tile_palette_map_offset = @Vector(2, u12){ 300, 470 };
 pub const sprite_map_cell_cols = 16;
 pub const sprite_map_cell_rows = 16;
 pub const sprite_map_offset = @Vector(2, u12){ 1, 770 };
+pub const instructions_offset = @Vector(2, u12){ 470, 770 };
+pub const instructions_len = 6;
+pub const text_spacing = 1;

@@ -93,6 +93,7 @@ ${initPlayerBody()}
 ; init score
     sta score
     sta score+1
+    sta new_hi_score
 `;
 
 const instructions = () => asm`
@@ -100,6 +101,32 @@ const instructions = () => asm`
 .logic:
 
     jsr print_score
+
+.check_eat_apple:
+    SUBROUTINE
+    lda player_x
+    cmp apple_x
+    bne .end
+    lda player_y
+    cmp apple_y
+    bne .end
+; apple eaten
+    jsr spawn_apple
+    lda growing
+    adc #PLAYER_GROWTH_PER_APPLE
+    sta growing
+    lda #12
+    sta se_eat_apple_timer
+    lda score
+    sed
+    adc #${constants.SCORE_PER_APPLE}
+    sta score
+    lda #0
+    adc score+1
+    sta score+1
+    cld
+.end:
+
 
 .body_spawn:
     SUBROUTINE
@@ -499,31 +526,6 @@ BODY_PALETTE EQU %01010101
 
 .end:
 
-.check_eat_apple:
-    SUBROUTINE
-    lda player_x
-    cmp apple_x
-    bne .end
-    lda player_y
-    cmp apple_y
-    bne .end
-; apple eaten
-    jsr spawn_apple
-    lda growing
-    adc #PLAYER_GROWTH_PER_APPLE
-    sta growing
-    lda #12
-    sta se_eat_apple_timer
-    lda score
-    sed
-    adc #${constants.SCORE_PER_APPLE}
-    sta score
-    lda #0
-    adc score+1
-    sta score+1
-    cld
-.end:
-
 .update_head_pos:
     SUBROUTINE
     clc
@@ -559,6 +561,7 @@ const readWriteData = () => asm`
 growing: ds 1
 is_game_over: ds 1
 score: ds 2
+new_hi_score: ds 1
 `;
 
 // top_left     = 00
@@ -613,6 +616,10 @@ const tileIndex = (x, y) => asm`${
     constants.TPATM + x + y * 32
 }`;
 
+const tilePatternAddrIndex = (x, y) => asm`${
+    constants.TPALM + Math.floor((x + y * 32) / 4)
+}`;
+
 const print = (s, x, y) => {
     const score = constants.STRING(s);
 
@@ -623,7 +630,7 @@ const print = (s, x, y) => {
 };
 
 /// source has to be decimal mode
-const printNumber = (source, n_bytes, x, y) =>
+const printDecimalNumber = (source, n_bytes, x, y) =>
     repeat(n_bytes, "").map((_, i) => asm`
     clc
     lda ${source}${i > 0 ? `+${i}` : ""}
@@ -641,14 +648,165 @@ const printNumber = (source, n_bytes, x, y) =>
 `).join('');
 
 const displayScore = () => print("SCORE:", 1, 0);
-const displayGameOver = () => print("GAME OVER", 10, 16);
+const displayGameOver = () => asm`
+${print("GAME OVER", 10, 16)}
+    lda #%10100000
+    sta ${tilePatternAddrIndex(10, 16)}
+    lda #%10001010
+    sta ${tilePatternAddrIndex(14, 16)}
+    lda #%00101010
+    sta ${tilePatternAddrIndex(18, 16)}
+`;
 
 const subroutines = () => asm`
 print_score:
     SUBROUTINE
 ${displayScore()}
-${printNumber("score", 2, 8, 0)}
+${printDecimalNumber("score", 2, 8, 0)}
     rts
+
+print_hi_scores:
+    SUBROUTINE
+${print("HI-SCORES:", 10, 4)}
+    lda #%10100000
+    sta ${tilePatternAddrIndex(10, 4)}
+    lda #%10101000
+    sta ${tilePatternAddrIndex(14, 4)}
+    lda #%10101010
+    sta ${tilePatternAddrIndex(18, 4)}
+${range(0, constants.HI_SCORE_LEN - 1).map(i => asm`
+    lda hi_score_label_one${i == 0 ? "" : "+"+i}
+    sta ${tileIndex(10, 6 + i)}
+    lda hi_score_label_two${i == 0 ? "" : "+"+i}
+    sta ${tileIndex(11, 6 + i)}
+    lda hi_score_label_three${i == 0 ? "" : "+"+i}
+    sta ${tileIndex(12, 6 + i)}
+${printDecimalNumber(`hi_score_hi${i == 0 ? "" : "+"+i}`, 1, 15, 6 + i)}
+${printDecimalNumber(`hi_score_lo${i == 0 ? "" : "+"+i}`, 1, 17, 6 + i)}
+    lda #%10100000
+    sta ${tilePatternAddrIndex(10, 6 + i)}
+    lda #%10000010
+    sta ${tilePatternAddrIndex(14, 6 + i)}
+    lda #%00101010
+    sta ${tilePatternAddrIndex(18, 6 + i)}
+`).join('')}
+    rts
+
+handle_new_hi_score:
+    SUBROUTINE
+    ldx new_hi_score
+    dex
+    lda INP1_PRESSED
+    and #BUTTON_DOWN
+    beq .check_up
+    lda temp ; new_hi_score_cursor
+    bne .check_inc_two
+    lda hi_score_label_one,x
+    jsr .handle_inc_wrap
+    sta hi_score_label_one,x
+    rts
+.check_inc_two:
+    cmp #1
+    bne .check_inc_three
+    lda hi_score_label_two,x
+    jsr .handle_inc_wrap
+    sta hi_score_label_two,x
+    rts
+.check_inc_three:
+    lda hi_score_label_three,x
+    jsr .handle_inc_wrap
+    sta hi_score_label_three,x
+    rts
+.check_up:
+    lda INP1_PRESSED
+    and #BUTTON_UP
+    beq .check_left
+    lda temp ; new_hi_score_cursor
+    bne .check_dec_two
+    lda hi_score_label_one,x
+    jsr .handle_dec_wrap
+    sta hi_score_label_one,x
+    rts
+.check_dec_two:
+    cmp #1
+    bne .check_dec_three
+    lda hi_score_label_two,x
+    jsr .handle_dec_wrap
+    sta hi_score_label_two,x
+    rts
+.check_dec_three:
+    lda hi_score_label_three,x
+    jsr .handle_dec_wrap
+    sta hi_score_label_three,x
+    rts
+.handle_inc_wrap:
+    clc
+    adc #1
+    cmp #75
+    bne .end
+    lda #7
+    rts
+.handle_dec_wrap:
+    sec
+    sbc #1
+    cmp #6
+    bne .end
+    lda #74
+    rts
+.check_left:
+    lda INP1_PRESSED
+    and #BUTTON_LEFT
+    beq .check_right
+    dec temp
+    bpl .end
+    lda #2
+    sta temp
+.check_right:
+    lda INP1_PRESSED
+    and #BUTTON_RIGHT
+    beq .check_done
+    inc temp
+    lda temp
+    cmp #3
+    bne .end
+    lda #0
+    sta temp
+.check_done:
+    lda INP1_PRESSED
+    and #BUTTON_A
+    beq .end
+    lda #0
+    sta new_hi_score
+.end:
+    rts
+
+paint_new_hi_score:
+    SUBROUTINE
+    lda #TPALM >> 8
+    sta temp+2
+    ldx temp
+    lda new_hi_score_palette_addr_lo_table,x
+    sta temp+1
+    ldx new_hi_score
+    clc
+.loop:
+    adc #8
+    dex
+    bne .loop
+.draw:
+    sta temp+1
+    ldy #0
+    ldx temp
+    lda new_hi_score_palette_color_table,x
+    ora (temp+1),y
+    sta (temp+1),y
+.end:
+    rts
+
+new_hi_score_palette_color_table:
+    byte %00110000, %11000000, %00000011
+new_hi_score_palette_addr_lo_table:
+    byte (4 * 8 + 10), (4 * 8 + 10), (4 * 8 + 11)
 
 game_over:
     SUBROUTINE
@@ -656,13 +814,25 @@ ${displayGameOver()}
     jsr turn_off_music
     lda #$FC
     sta se_game_over_timer
+    jsr update_hi_score
+    lda #0
+    sta temp ; new_hi_score_cursor = 0
 .loop:
     jsr update_se_game_over
     jsr print_score
+    lda se_game_over_timer
+    bne .input_check
+    jsr print_hi_scores
+    lda new_hi_score
+    beq .input_check
+    jsr handle_new_hi_score
+    jsr paint_new_hi_score
+    jmp .new_frame
 .input_check:
     lda INP1_PRESSED
     and #BUTTON_A
     bne .restart
+.new_frame:
     sta VSYNC
     jmp .loop
 .restart:
@@ -689,24 +859,125 @@ ${logic.init()}
 
     jsr init_board
     jsr spawn_apple
+.end:
+    rts
+
+update_hi_score:
+    SUBROUTINE
+    ; dasraizer algo:
+    ; - assume we have an ordered list, asc top place
+    ; - start from the bottom
+    ; bottom_check:
+    ;   if (score <= bottom) return (no new hi-score)
+    ;   overwrite bottom with score
+    ; loop(from bottom - 1):
+    ;   if (score > cursor)
+    ;     overwrite cursor+1 with cursor
+    ;     overwrite cursor with score
+    ;     if (cursor == 0) return (new hi-score first place)
+    ;     continue :loop
+    ;   else
+    ;     return (new hi-score)
+
+; if (score.hi < hi_score.last.hi) return
+    lda score+1
+    cmp hi_score_hi+${constants.HI_SCORE_LEN - 1}
+    bcc .end
+    bne .skip_check_lo_bottom
+; if (score.lo <= hi_score.last.lo) return
+    lda hi_score_lo+${constants.HI_SCORE_LEN - 1}
+    cmp score
+    bcs .end
+.skip_check_lo_bottom:
+
+; overwrite bottom
+    lda #${constants.FONT('A')}
+    sta hi_score_label_one+${constants.HI_SCORE_LEN - 1}
+    lda #${constants.FONT('A')}
+    sta hi_score_label_two+${constants.HI_SCORE_LEN - 1}
+    lda #${constants.FONT('A')}
+    sta hi_score_label_three+${constants.HI_SCORE_LEN - 1}
+    lda score
+    sta hi_score_lo+${constants.HI_SCORE_LEN - 1}
+    lda score+1
+    sta hi_score_hi+${constants.HI_SCORE_LEN - 1}
+    lda #${constants.HI_SCORE_LEN}
+    sta new_hi_score
+
+    ldx #${constants.HI_SCORE_LEN - 2}
+.loop:
+; if (score.hi < hi_score[x].hi) return
+    lda score+1
+    cmp hi_score_hi,x
+    bcc .end
+    bne .skip_check_lo_x
+; if (score.lo <= hi_score[x].lo) return
+    lda hi_score_lo,x
+    cmp score
+    bcs .end
+.skip_check_lo_x:
+; overwrite cursor+1 with cursor
+    lda hi_score_label_one,x
+    sta hi_score_label_one+1,x
+    lda hi_score_label_two,x
+    sta hi_score_label_two+1,x
+    lda hi_score_label_three,x
+    sta hi_score_label_three+1,x
+    lda hi_score_lo,x
+    sta hi_score_lo+1,x
+    lda hi_score_hi,x
+    sta hi_score_hi+1,x
+; overwrite cursor with score
+    lda #${constants.FONT('A')}
+    sta hi_score_label_one,x
+    lda #${constants.FONT('A')}
+    sta hi_score_label_two,x
+    lda #${constants.FONT('A')}
+    sta hi_score_label_three,x
+    lda score
+    sta hi_score_lo,x
+    lda score+1
+    sta hi_score_hi,x
+    dec new_hi_score
+; if (x == 0) return
+    cpx #0
+    beq .end
+; continue :loop
+    dex
+    jmp .loop
+
+    ; shitty algo:
+    ; if (we have a hi-score)
+    ;   find lowest score index
+    ;   replace that index with new score
+    ;   reorder score indexes
+    ;   set new hi-score flag
+
+    ; theoretical max score = max apples eaten * score per apple
+    ; score per apple = 10
+    ; max apples eaten = 32*31 = 1024 - 32 ~= 1000
+    ; tms ~= 10000
+
+.end:
     rts
 `;
 
-const hiScoreEntry = () => asm`
-    byte 0, 0, 0 ; letters
-    byte 0, 0    ; score
-    byte 0, 0, 0 ; letters
-`;
-
-const hiScoreIndexEntry = () => asm`
-    byte 0       ; hi_score index
-`;
+// const HiScoreEntry = struct {
+//     hi_score: u16,
+//     label: [3]u8,
+// }
 
 const persistentData = () => asm`
-hi_scores:
-${repeat(constants.HI_SCORE_LEN, hiScoreEntry()).join('')}
-hi_score_indexed:
-${repeat(constants.HI_SCORE_LEN, hiScoreIndexEntry()).join('')}
+hi_score_lo:
+${repeat(constants.HI_SCORE_LEN, asm`    byte 0`).join('\n')}
+hi_score_hi:
+${repeat(constants.HI_SCORE_LEN, asm`    byte 0`).join('\n')}
+hi_score_label_one:
+${repeat(constants.HI_SCORE_LEN, asm`    byte 0`).join('\n')}
+hi_score_label_two:
+${repeat(constants.HI_SCORE_LEN, asm`    byte 0`).join('\n')}
+hi_score_label_three:
+${repeat(constants.HI_SCORE_LEN, asm`    byte 0`).join('\n')}
 `;
 
 export { init, instructions, readWriteData, readOnlyData, subroutines, persistentData };

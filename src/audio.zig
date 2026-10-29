@@ -54,7 +54,6 @@ pub const Audio = struct {
             const frequency = @as(f32, @floatFromInt(int)) + @as(f32, @floatFromInt(self.frequency.fraction)) / 100;
             self.phase_step = (frequency / sample_rate) * 8;
             // self.phase = 0;
-            std.log.debug("setting frequency to {} from {},{},{}, phase_step: {}", .{ frequency, self.frequency.int_hi, self.frequency.int_lo, self.frequency.fraction, self.phase_step });
         }
     };
     const square_wave_size = getPackedStructByteSize(SquareWave);
@@ -108,7 +107,6 @@ pub const Audio = struct {
             const frequency = @as(f32, @floatFromInt(int)) + @as(f32, @floatFromInt(self.frequency.fraction)) / 100;
             self.phase_step = (frequency / sample_rate) * 32;
             // self.phase = 0;
-            std.log.debug("setting frequency to {} from {},{},{}, phase_step: {}", .{ frequency, self.frequency.int_hi, self.frequency.int_lo, self.frequency.fraction, self.phase_step });
         }
     };
     const triangle_wave_size = getPackedStructByteSize(TriangleWave);
@@ -150,7 +148,6 @@ pub const Audio = struct {
             const frequency = @as(f32, @floatFromInt(int)) + @as(f32, @floatFromInt(self.frequency.fraction)) / 100;
             self.phase_step = frequency / sample_rate;
             // self.phase = 0;
-            std.log.debug("setting frequency to {} from {},{},{}, phase_step: {}", .{ frequency, self.frequency.int_hi, self.frequency.int_lo, self.frequency.fraction, self.phase_step });
         }
     };
     const noise_size = getPackedStructByteSize(Noise);

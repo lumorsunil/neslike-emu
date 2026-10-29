@@ -2,7 +2,7 @@ export const TPATM = 0x400;
 export const TPALM = 0x800;
 export const PLAYER_BODY_SIZE_INIT = 2;
 export const HI_SCORE_LEN = 3;
-export const SCORE_PER_APPLE = 10;
+export const SCORE_PER_APPLE = 0x10;
 export const PLAYER_SPEED = 2;
 
 export const FONT = (x) => 7 + fontTable[x];

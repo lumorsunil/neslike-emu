@@ -120,9 +120,10 @@ ${font()}
 tile_data_size = . - tile_data
 
 tile_palette_data:    
-    byte 25, 42, 25, 25
-    byte 25, 43, 22, 14
-    byte 14, 32, 22, 14
+    byte 25, 42, 25, 25 ; grass
+    byte 25, 43, 22, 14 ; body
+    byte 14, 32, 22, 14 ; ui
+    byte 32, 14, 14, 14 ; ui_select
 tile_palette_data_size = . - tile_palette_data
 sprite_data:    
 ; vertical head

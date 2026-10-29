@@ -13,7 +13,7 @@ pub fn Module(comptime Impl: type) type {
             return .{ .memory_map = .init(mmap_min, Impl.memory_len) };
         }
 
-        pub fn isMapped(self: *@This(), addr: u16) ?Impl.Addr {
+        pub fn isMapped(self: *const @This(), addr: u16) ?Impl.Addr {
             return self.memory_map.isMapped(Impl.Addr, addr);
         }
 

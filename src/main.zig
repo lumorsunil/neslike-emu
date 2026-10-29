@@ -16,6 +16,8 @@ const Randomizer = @import("randomizer.zig").Randomizer;
 const Debug = @import("debug.zig").Debug;
 const MemoryMap = @import("memory-map.zig").MemoryMap;
 const UI = @import("ui.zig");
+const BinaryPatch = @import("binary-patch.zig").BinaryPatch;
+const MOS6502 = @import("6502.zig");
 
 const tile = [16]u8{
     0b00_00_00_00, 0b00_00_00_00,
@@ -39,6 +41,8 @@ const tile2 = [16]u8{
     0b00_00_00_00, 0b00_00_00_00,
 };
 
+const input_file_path = "test.bin";
+
 pub fn main(init: std.process.Init) !void {
     var ctx: MainContext = undefined;
     try initEmu(init.io, init.gpa, &ctx);
@@ -47,23 +51,40 @@ pub fn main(init: std.process.Init) !void {
     while (!rl.windowShouldClose()) {
         try loop(&ctx);
     }
+
+    const cartridge = ctx.file;
+    const drive = ctx.computer.modules.get(Drive).chip.memory[0..cartridge.len];
+    try BinaryPatch.save(init.io, cartridge, drive, input_file_path);
 }
 
 fn initEmu(io: std.Io, allocator: Allocator, ctx: *MainContext) !void {
-    ctx.* = MainContext{
-        .random = std.Random.IoSource{ .io = io },
-        .file = try std.Io.Dir.cwd().readFileAlloc(io, "test.bin", allocator, .unlimited),
-    };
-
     rl.initWindow(UI.screen_size[0], UI.screen_size[1], "Core Killer");
     rl.initAudioDevice();
     rl.setWindowFocused();
     rl.setWindowPosition(24, 24);
     // rl.setTargetFPS(60 * 2);
 
+    var binary_patch_allocating_writer = std.Io.Writer.Allocating.init(allocator);
+    errdefer binary_patch_allocating_writer.deinit();
+
+    BinaryPatch.load(io, &binary_patch_allocating_writer.writer, input_file_path) catch |err| switch (err) {
+        std.Io.File.OpenError.FileNotFound => {},
+        else => return err,
+    };
+
+    const file = try std.Io.Dir.cwd().readFileAlloc(io, input_file_path, allocator, .unlimited);
+    errdefer allocator.free(file);
+
+    ctx.* = MainContext{
+        .random = std.Random.IoSource{ .io = io },
+        .file = file,
+        .binary_patch = try binary_patch_allocating_writer.toOwnedSlice(),
+        .font = try rl.loadFont("Ac437_IBM_VGA_8x14.ttf"),
+    };
+
     initStartupChip(ctx);
     initMemoryChip(ctx);
-    initDriveChip(ctx);
+    try initDriveChip(ctx);
     initRandomizerChip(ctx);
     try initGraphicsChip(ctx);
     try initMemoryRenderBuffers(ctx);
@@ -76,16 +97,17 @@ fn initEmu(io: std.Io, allocator: Allocator, ctx: *MainContext) !void {
 
 fn deinitEmu(allocator: Allocator, ctx: *MainContext) void {
     allocator.free(ctx.file);
+    allocator.free(ctx.binary_patch);
     rl.closeWindow();
     rl.closeAudioDevice();
 }
 
-fn restartComputer(ctx: *MainContext) void {
+fn restartComputer(ctx: *MainContext) !void {
     ctx.is_continuing = false;
     restartCpuChip(ctx);
     restartStartupChip(ctx);
     restartMemoryChip(ctx);
-    restartDriveChip(ctx);
+    try restartDriveChip(ctx);
     restartRandomizerChip(ctx);
     restartGraphicsChip(ctx);
     restartAudio(ctx);
@@ -115,14 +137,14 @@ fn restartMemoryChip(ctx: *MainContext) void {
     ctx.random.interface().bytes(&ctx.computer.modules.get(Memory).chip.memory);
 }
 
-fn initDriveChip(ctx: *MainContext) void {
-    restartDriveChip(ctx);
+fn initDriveChip(ctx: *MainContext) !void {
+    try restartDriveChip(ctx);
 }
 
-fn restartDriveChip(ctx: *MainContext) void {
-    for (0..ctx.file.len) |i| {
-        ctx.computer.modules.get(Drive).chip.memory[i] = ctx.file[i];
-    }
+fn restartDriveChip(ctx: *MainContext) !void {
+    const drive_memory = ctx.computer.modules.get(Drive).chip.memory[0..ctx.file.len];
+    @memcpy(drive_memory, ctx.file);
+    try BinaryPatch.deserialize(drive_memory, ctx.binary_patch);
 }
 
 fn initRandomizerChip(ctx: *MainContext) void {
@@ -262,7 +284,9 @@ fn drawMemoryRenderBufferBackgrounds(ctx: *MainContext) void {
 const MainContext = struct {
     is_continuing: bool = false,
     is_fullscreen: bool = true,
+    font: rl.Font,
     file: []const u8,
+    binary_patch: []const u8,
     random: std.Random.IoSource,
     computer: Computer = .{},
 
@@ -332,7 +356,9 @@ fn loop(ctx: *MainContext) !void {
     switch (try updateEmuControls(ctx)) {
         .cont => {},
         .restart => {
-            restartComputer(ctx);
+            try restartComputer(ctx);
+            rl.beginDrawing();
+            rl.endDrawing();
             return;
         },
     }
@@ -341,9 +367,10 @@ fn loop(ctx: *MainContext) !void {
     rl.beginDrawing();
     rl.clearBackground(.black);
 
-    drawCpu(ctx.computer);
+    try drawCpu(ctx);
     try drawController(ctx.computer, ctx.textures);
     drawMemory(ctx);
+    try drawInstructions(ctx);
 
     const graphics = ctx.computer.modules.get(Graphics);
     const screen_scale: f32 = if (ctx.is_fullscreen) 4 else 2;
@@ -429,66 +456,129 @@ fn drawMemory(ctx: *MainContext) void {
     ctx.tile_palette_map_render_buffer.texture.drawPro(ctx.tile_palette_map_src, ctx.tile_palette_map_dst, .zero(), 0, .white);
 }
 
-fn drawCpu(computer: Computer) void {
-    const font_char_width: usize = @intCast(rl.measureText("X", UI.font_size));
+fn drawCpu(ctx: *MainContext) !void {
+    const font_char_width: usize = (@intCast(rl.measureText("X", UI.font_size) + UI.text_spacing));
     const col_width: usize = font_char_width * (4 + 2);
-    var buf: [16]u8 = undefined;
+    var buf: [32]u8 = undefined;
 
     const registers_to_draw = .{ .a, .x, .y, .pc };
+    const flags_to_draw = .{ .carry, .zero_, .decimal_mode, .overflow, .negative };
+    const flag_tag_to_label = .{ "c", "z", "d", "o", "n" };
 
     inline for (registers_to_draw, 0..) |field, i| {
         const x = (i % 2) * col_width;
         const y = @divFloor(i, 2) * UI.font_size;
         const label = @tagName(field);
-        const data = @field(computer.cpu.registers, label);
+        const data = @field(ctx.computer.cpu.registers, label);
         const text = std.fmt.bufPrintZ(&buf, "{s}: {f}", .{ label, data }) catch "err";
-        rl.drawText(text, @intCast(x), @intCast(y), UI.font_size, .green);
+        rl.drawTextEx(ctx.font, text, .init(@floatFromInt(x), @floatFromInt(y)), UI.font_size, UI.text_spacing, .green);
+    }
+    inline for (flags_to_draw, 0..) |field, i| {
+        const width = font_char_width * 3;
+        const x = i * width + 10 * font_char_width;
+        const y = 4 * UI.font_size;
+        const tag = @tagName(field);
+        const label = flag_tag_to_label[i];
+        const data = @field(ctx.computer.cpu.flags, tag);
+        const text = std.fmt.bufPrintZ(&buf, "{s}:{}", .{ label, data }) catch "err";
+        rl.drawTextEx(ctx.font, text, .init(@floatFromInt(x), @floatFromInt(y)), UI.font_size, UI.text_spacing, .green);
     }
     {
         const x = 0;
         const y = 2 * UI.font_size;
         const label = "ir";
-        const data = computer.cpu.instruction_register;
-        const text = std.fmt.bufPrintZ(&buf, "{s}: {f}", .{ label, data }) catch "err";
-        rl.drawText(text, @intCast(x), @intCast(y), UI.font_size, .green);
+        const data = ctx.computer.cpu.instruction_register;
+        const decoded = brk: {
+            if (ctx.computer.cpu.instr_addr) |addr| {
+                const drive = ctx.computer.modules.getConst(Drive);
+                if (drive.isMapped(addr)) |rel_addr| {
+                    const decoded, _ = MOS6502.Instruction.decode(drive.chip.memory[rel_addr..]) catch |err| switch (err) {
+                        MOS6502.Instruction.DecodeError.InvalidOpcode => break :brk null,
+                        else => return err,
+                    };
+                    break :brk decoded;
+                }
+            }
+            break :brk null;
+        };
+        const text = std.fmt.bufPrintZ(&buf, "{s}: {f} {?f}", .{ label, data, decoded }) catch "err";
+        rl.drawTextEx(ctx.font, text, .init(@floatFromInt(x), @floatFromInt(y)), UI.font_size, UI.text_spacing, .green);
     }
     {
         const x = 0;
         const y = 3 * UI.font_size;
         const label = "ab";
-        const data = computer.cpu.address_bus;
+        const data = ctx.computer.cpu.address_bus;
         const text = std.fmt.bufPrintZ(&buf, "{s}: {f}", .{ label, data }) catch "err";
-        rl.drawText(text, @intCast(x), @intCast(y), UI.font_size, .green);
+        rl.drawTextEx(ctx.font, text, .init(@floatFromInt(x), @floatFromInt(y)), UI.font_size, UI.text_spacing, .green);
     }
     {
         const x = col_width + font_char_width * 2;
         const y = 3 * UI.font_size;
         const label = "db";
-        const data = computer.cpu.data_bus;
+        const data = ctx.computer.cpu.data_bus;
         const text = std.fmt.bufPrintZ(&buf, "{s}: {f}", .{ label, data }) catch "err";
-        rl.drawText(text, @intCast(x), @intCast(y), UI.font_size, .green);
+        rl.drawTextEx(ctx.font, text, .init(@floatFromInt(x), @floatFromInt(y)), UI.font_size, UI.text_spacing, .green);
     }
     {
         const x = 0;
         const y = 4 * UI.font_size;
         const label = "rw";
-        const data = computer.cpu.read_write;
+        const data = ctx.computer.cpu.read_write;
         const text = std.fmt.bufPrintZ(&buf, "{s}: {t}", .{ label, data }) catch "err";
-        rl.drawText(text, @intCast(x), @intCast(y), UI.font_size, .green);
+        rl.drawTextEx(ctx.font, text, .init(@floatFromInt(x), @floatFromInt(y)), UI.font_size, UI.text_spacing, .green);
     }
 }
 
-fn drawMemoryAsText(computer: Computer) void {
+fn drawInstructions(ctx: *MainContext) !void {
+    var buf: [32]u8 = undefined;
+
+    const x_offset = UI.instructions_offset[0];
+    const y_offset = UI.instructions_offset[1];
+
+    const start_addr = ctx.computer.cpu.instr_addr orelse {
+        const pc = ctx.computer.cpu.registers.pc;
+        const x = 0 + x_offset;
+        const y = 0 + y_offset;
+        const text = std.fmt.bufPrintZ(&buf, "{x:04}: ????", .{pc.toInt()}) catch "err";
+        rl.drawTextEx(ctx.font, text, .init(@floatFromInt(x), @floatFromInt(y)), UI.font_size, UI.text_spacing, .green);
+        return;
+    };
+
+    const drive = ctx.computer.modules.getConst(Drive);
+    var addr_cursor = start_addr;
+    draw_instructions: for (0..UI.instructions_len) |i| {
+        const instr_addr = addr_cursor;
+        const x = 0 + x_offset;
+        const y = i * UI.font_size + y_offset;
+        const decoded = brk: {
+            if (drive.isMapped(addr_cursor)) |rel_addr| {
+                const decoded, const len = MOS6502.Instruction.decode(drive.chip.memory[rel_addr..]) catch |err| switch (err) {
+                    MOS6502.Instruction.DecodeError.InvalidOpcode => break :brk null,
+                    MOS6502.Instruction.DecodeError.EndOfSource => break :draw_instructions,
+                    else => return err,
+                };
+                addr_cursor += len;
+                break :brk decoded;
+            }
+            break :brk null;
+        };
+        const text = std.fmt.bufPrintZ(&buf, "{x:04}: {?f}", .{ instr_addr, decoded }) catch "err";
+        rl.drawTextEx(ctx.font, text, .init(@floatFromInt(x), @floatFromInt(y)), UI.font_size, UI.text_spacing, .green);
+    }
+}
+
+fn drawMemoryAsText(ctx: *MainContext) void {
     const cols = UI.memory_text_cols;
     const rows = UI.memory_text_rows;
     const font_char_width = rl.measureText("X", UI.font_size);
     const page_len = cols * rows;
-    const page = @divFloor(computer.cpu.registers.pc.toInt(), page_len);
+    const page = @divFloor(ctx.computer.cpu.registers.pc.toInt(), page_len);
     const i_offset: usize = page * page_len;
     draw_memory: for (0..cols) |col| {
         for (0..rows) |row| {
             const i = col + row * cols + i_offset;
-            const memory = computer.modules.getConst(Memory);
+            const memory = ctx.computer.modules.getConst(Memory);
             if (i >= memory.memory.len) break :draw_memory;
             const byte = memory.memory[i];
             var buf: [16]u8 = undefined;
@@ -497,11 +587,11 @@ fn drawMemoryAsText(computer: Computer) void {
             const x_offset = if (col % 2 == 0) 0 else font_char_width * 2;
             const x: i32 = @as(i32, @intCast(@divFloor(col, 2))) * (font_char_width * 5) + x_offset + UI.memory_offset[0];
             const y: i32 = @as(i32, @intCast(row)) * (UI.font_size + 3) + UI.memory_offset[1];
-            if (computer.cpu.registers.pc.toInt() == i) {
+            if (ctx.computer.cpu.registers.pc.toInt() == i) {
                 rl.drawRectangle(x - 2, y - 2, font_char_width * 2 + 2, UI.font_size + 2, .green);
             }
-            const color: rl.Color = if (computer.cpu.registers.pc.toInt() == i) .black else .green;
-            rl.drawText(text, x, y, UI.font_size, color);
+            const color: rl.Color = if (ctx.computer.cpu.registers.pc.toInt() == i) .black else .green;
+            rl.drawTextEx(ctx.font, text, .init(@floatFromInt(x), @floatFromInt(y)), UI.font_size, UI.text_spacing, color);
         }
     }
 }

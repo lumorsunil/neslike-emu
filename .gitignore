@@ -8,3 +8,4 @@ zig-out
 dasm.exe
 *.bin
 *.tmp
+*.patch

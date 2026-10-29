@@ -34,11 +34,6 @@ main:
 )§ emit(music.init()) )§
 )§ emit(logic.init()) )§
 
-; TODO: Score
-;   TODO: Persistent score
-; TODO: Fix bug where apple spawns on body
-; TODO: Make score not collidable
-
 frame:
 
 )§ emit(controls.instructions()) )§
@@ -56,7 +51,7 @@ subroutines:
 )§ emit(music.subroutines()) )§
 
     seg rwm
-    org $E000
+    org $E000, $00
 )§ emit(logic.persistentData()) )§
 
     seg rom

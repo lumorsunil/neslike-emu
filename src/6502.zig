@@ -1304,7 +1304,7 @@ pub const Instruction = struct {
     type: *const Type,
     mode: AddressingMode,
 
-    pub fn decode(source: []const u8) DecodeError!struct { @This(), usize } {
+    pub fn decode(source: []const u8) DecodeError!struct { @This(), u8 } {
         @setEvalBranchQuota(100000);
 
         if (source.len == 0) return DecodeError.EndOfSource;

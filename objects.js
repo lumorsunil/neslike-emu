@@ -73,12 +73,39 @@ init_apple_data:
 
 const subroutines = () => asm`
 spawn_apple:
+    ldy #0
+.loop:
     lda RAND
-    and #%11111000
+    sta temp
+    lda RAND
+    and #%00000011
+    ora #%00000100
+    sta temp+1
+
+; check if location is valid
+    ; grid x --> 0000_0000_0001_1111
+    ; grid y --> 0000_0011_1110_0000
+    ; grid x = x / 8
+    ; grid y = y / 8
+    ; grid i = grid x + y * 4
+
+    lda (temp),y
+    bne .loop
+
+    lda temp
+    asl
+    asl
+    asl
     sta apple_x
-    lda RAND
+    lda temp
+    clc
+    ror temp+1
+    ror
+    ror temp+1
+    ror
     and #%11111000
     sta apple_y
+
     rts
 `;
 

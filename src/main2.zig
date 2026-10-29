@@ -14,8 +14,6 @@ fn audioCallback(buffer_any: ?*anyopaque, frames: c_uint) callconv(.c) void {
             phase -= 1;
         }
     }
-
-    std.log.debug("buffer[0]: {}", .{buffer[0]});
 }
 
 pub fn main(init: std.process.Init) !void {
