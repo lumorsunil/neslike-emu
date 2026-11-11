@@ -9,3 +9,5 @@ dasm.exe
 *.bin
 *.tmp
 *.patch
+
+printer.txt

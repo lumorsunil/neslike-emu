@@ -6,7 +6,7 @@ import * as logic from "./logic.js";
 import * as graphics from "./graphics.js";
 
 const tilePatternIndexOf = (x, y) => {
-    const i = (x + y * 32) + constants.TPATM;
+    const i = (x + y * 64) + constants.TPATM;
     const lo = i & 0x00FF;
     const hi = (i & 0xFF00) >> 8;
 
@@ -14,15 +14,16 @@ const tilePatternIndexOf = (x, y) => {
 };
 
 const tilePaletteIndexOf = (x, y) => {
-    const i = (x / 4 + y * 8) + constants.TPALM;
+    const i = Math.floor(x / 4) + y * 16 + constants.TPALM;
     const lo = i & 0x00FF;
     const hi = (i & 0xFF00) >> 8;
 
     const bit_i = (x % 4);
     const shift = bit_i * 2;
     const slot_clear = 0b11111111 ^ (0b11 << shift);
+    const slot_set = ~slot_clear;
 
-    return { lo, hi, shift, slot_clear };
+    return { lo, hi, shift, slot_clear, slot_set };
 };
 
 const setTilePattern = (x, y, pattern) => {
@@ -101,6 +102,7 @@ const instructions = () => asm`
 .logic:
 
     jsr print_score
+    ; jsr shake_screen
 
 .check_eat_apple:
     SUBROUTINE
@@ -150,18 +152,27 @@ const instructions = () => asm`
     beq .spawn_body_part
     dec growing
 
+; grid_col = player_x / 8
+; grid_row = player_y / 8
+; grid_i = grid_row * 64 + grid_col
+; grid_i = (player_y * 8) + (player_x / 8)
+
 .spawn_body_part:
-    lda #1
-    sta temp+1
     lda #0
     sta temp
+    sta temp+1
     lda player_y
     asl ; a(grid_y) = player_y << 1
     rol temp+1
     asl ; grid_y <<= 1
     rol temp+1
-    and #%11100000 ; a = (player_y << 2) & 1110_0000
-    sta temp       ; grid_i.lo = (player_y << 2) & 1110_0000
+    asl ; grid_y <<= 1
+    rol temp+1
+    and #%11000000 ; a = (player_y << 3) & 1100_0000
+    sta temp       ; grid_i.lo = (player_y << 3) & 1100_0000
+    lda temp+1
+    adc #>TPATM
+    sta temp2+1; temp2 = grid_i + TPATM
     lda player_x
     lsr
     lsr
@@ -170,55 +181,60 @@ const instructions = () => asm`
     adc temp ; grid_i.lo += (player_x >> 3)
              ;               000x_xxxx
     sta temp
+    sta temp2
     ldx player_body_spawn_type
     lda body_type,x
     ldy #0
-    sta (temp),y ; TPATM[ grid_i ] = 1
+    sta (temp2),y ; TPATM[ grid_i ] = body_type[x]
 
 .check_death:
+    ; lda temp
+    ; sta temp2
+    ; lda temp+1
+    ; sta temp2+1
     lda temp
-    sta temp2
+    sta temp3
     lda temp+1
-    sta temp2+1
+    sta temp3+1
 
 .check_death_v_x_pos:
-    ; if (player_v_x > 0) check (temp + 1) % 32
+    ; if (player_v_x > 0) check (temp + 1) % 64
     lda player_v_x
     beq .check_death_v_y_pos
     bmi .check_death_v_x_neg
-    lda temp2
+    lda temp3
     clc
     adc #1
     and #%00011111
     tax
-    lda temp2
-    and #%11100000
-    sta temp2
+    lda temp3
+    and #%11000000
+    sta temp3
     txa
     clc
-    adc temp2
-    sta temp2
+    adc temp3
+    sta temp3
     jmp .check_death_tile
 
 .check_death_v_x_neg:
     ; else if (player_v_x < 0) check temp - 1
     ; true
-    lda temp2
+    lda temp3
     sec
     sbc #1
     and #%00011111
     tax
-    lda temp2
-    and #%11100000
-    sta temp2
+    lda temp3
+    and #%11000000
+    sta temp3
     txa
     clc
-    adc temp2
-    sta temp2
+    adc temp3
+    sta temp3
     jmp .check_death_tile
 
 .check_death_v_y_pos:
-    ; else if (player_v_y > 0) check (temp + 32) % 0x3ff
+    ; else if (player_v_y > 0) check (temp + 64) % 0x3ff
 
     ; x = 0b0000_0000_0001_1111
     ; y = 0b0000_0011_1110_0000
@@ -228,69 +244,69 @@ const instructions = () => asm`
 
     lda player_v_y
     bmi .check_death_v_y_neg
-    lda temp2
+    lda temp3
     clc
-    adc #32
-    sta temp2
-    lda temp2+1
-    and #%11
+    adc #64
+    sta temp3
+    lda temp3+1
+    and #%111
     adc #0 ; temp2.hi += carry
-    cmp #%100
+    cmp #%1000
     bne .wrap_pos_end
 
 .wrap_pos:
     tax
-    lda temp2
-    adc #32
-    sta temp2
+    lda temp3
+    adc #64
+    sta temp3
     lda player_y
     adc #${16 - constants.PLAYER_SPEED}
     sta player_y
     txa
 .wrap_pos_end:
 
-    and #%11    ; temp2.hi %= 0b11
-    clc
-    adc #(TPATM >> 8)
-    sta temp2+1
+    and #%111    ; temp2.hi %= 0b111
+    ; clc
+    ; adc #>TPATM
+    sta temp3+1
 
     jmp .check_death_tile
 
 .check_death_v_y_neg:
-    ; else if (player_v_y < 0) check temp - 32
+    ; else if (player_v_y < 0) check temp - 64
     ; true
-    lda temp2 ; 0b0000_00yy_yyyx_xxxx
+    lda temp3 ; 0b0000_0yyy_yy0x_xxxx
     sec
-    sbc #32
-    sta temp2
-    lda temp2+1
+    sbc #64
+    sta temp3
+    lda temp3+1
     sbc #0
-    and #%11
+    and #%111
     tax
 
     ; temp2.hi == 0
     bne .wrap_neg_end
 
     ; temp2.lo == 0
-    lda temp2
-    and #%11100000
+    lda temp3
+    and #%11000000
     bne .wrap_neg_end
 
     ; temp2.hi == 0 && temp2.lo == 0
 .wrap_neg:
-    lda temp2
-    ora #%11100000
-    sta temp2
+    lda temp3
+    ora #%11000000
+    sta temp3
     lda player_y
     sbc #${16 - constants.PLAYER_SPEED}
     sta player_y
-    ldx #%11
+    ldx #%111
 .wrap_neg_end:
 
-    clc
     txa
-    adc #(TPATM >> 8)
-    sta temp2+1
+    ; clc
+    ; adc #>TPATM
+    sta temp3+1
 
 ; ; DEBUG: check temp2 addr
 ;     ldx temp2
@@ -301,7 +317,11 @@ const instructions = () => asm`
 
 .check_death_tile:
     ldy #0
-    lda (temp2),y
+    lda temp3+1
+    clc
+    adc #>TPATM
+    sta temp3+1
+    lda (temp3),y
     beq .check_death_end
 
 ; ; DEBUG: check temp2 addr
@@ -338,34 +358,38 @@ const instructions = () => asm`
 .check_death_end:
 
 .update_palette:
-    ldy #0
-    sty temp+2
+    ; ldy #0
+    ; sty temp+2
+    lda #0
                ; temp    = gfed_cba9 8765_4321
-    lsr temp+1 ; temp.hi = 0gfe_dcba -->
-    ror temp   ; temp.lo = 9876_5432 -->
-    ror temp+2 ; temp+2  = 1000_0000
-    lsr temp+1 ; temp.hi = 00gf_edcb -->
-    ror temp   ; temp.lo = a987_6543 -->
-    ror temp+2 ; temp+2  = 2100_0000
-    rol temp+2 ; temp+2  = 1000_0000
-    rol temp+2 ; temp+2  = 0000_0002
-    rol temp+2 ; temp+2  = 0000_0021
-    ldx temp+2
-    lda #$08
-    sta temp+1 ; temp.hi = 5
+    lsr temp+1 ; temp.hi = 0gfe_dcba --> 9
+    ror temp   ; temp.lo = 9 --> 9876_5432 --> 1
+    ; ror temp+2 ; temp+2  = 1 --> 1000_0000
+    ror        ; temp+2  = 1 --> 1000_0000
+    lsr temp+1 ; temp.hi = 00gf_edcb --> a
+    ror temp   ; temp.lo = a --> a987_6543 --> 2
+    ; rol temp+2 ; temp+2  = 1 <-- 0000_0002 <-- 2
+    ; rol temp+2 ; temp+2  = 0000_0021 <-- 1
+    ; ldx temp+2
+    rol        ; temp+2  = 1 <-- 0000_0002 <-- 2
+    rol        ; temp+2  = 0000_0021 <-- 1
+    sta temp+2
+    lda temp+1
+    clc
+    adc #>TPALM
+    sta temp+1 ; temp.hi += >TPALM
 
     ; temp   = TPALM + (grid_i / 4)
     ; temp+2 = grid_i % 4
 
 .clear_palette:
+    ldx temp+2   ; x = grid_i % 4
     ldy #0
     lda (temp),y ; a = TPALM + (grid_i / 4)
-    ldx temp+2   ; x = grid_i % 4
     and palette_slots,x  ; a &= [slots+x]
     sta (temp),y ; [TPALM + (grid_i / 4)] &= [slots+x]
 
 .set_palette:
-    ldx temp+2   ; x = grid_i % 4
     lda #BODY_PALETTE
     and palette_slots_inv,x  ; a &= [slots+x]
     ora (temp),y ; [TPALM + (grid_i / 4)] = new_palette | (prev_palette & slot)
@@ -393,6 +417,7 @@ BODY_PALETTE EQU %01010101
 
 .end:
 
+; TODO: fix post-tile space 2x update (probably only palette index is the issue)
 .tail_eat_body:
     SUBROUTINE
 
@@ -409,17 +434,21 @@ BODY_PALETTE EQU %01010101
 .skip_escape:
 
 .calculate_grid_i:
-    lda #1
-    sta temp+1
     lda #0
     sta temp
+    sta temp+1
     lda tail_y
     asl ; a(grid_y) = player_y << 1
     rol temp+1
     asl ; grid_y <<= 1
     rol temp+1
-    and #%11100000 ; a = (player_y << 2) & 1110_0000
-    sta temp       ; grid_i.lo = (player_y << 2) & 1110_0000
+    asl ; grid_y <<= 1
+    rol temp+1
+    and #%11000000 ; a = (player_y << 3) & 1100_0000
+    sta temp       ; grid_i.lo = (player_y << 3) & 1100_0000
+    lda temp+1
+    adc #>TPATM
+    sta temp+1
     lda tail_x
     lsr
     lsr
@@ -490,7 +519,9 @@ BODY_PALETTE EQU %01010101
     rol temp+2 ; temp+2  = 0000_0002
     rol temp+2 ; temp+2  = 0000_0021
     ldx temp+2
-    lda #$08
+    clc
+    lda temp+1
+    adc #>TPALM
     sta temp+1 ; temp.hi = 5
 
 .clear_palette:
@@ -612,12 +643,12 @@ is_body_pattern_straight:
     byte 1, 0, 0, 0, 0, 1, 1
 `;
 
-const tileIndex = (x, y) => asm`${
-    constants.TPATM + x + y * 32
+const tileIndex = (x, y) => asm`$${
+    (constants.TPATM + x + y * 64).toString(16)
 }`;
 
-const tilePatternAddrIndex = (x, y) => asm`${
-    constants.TPALM + Math.floor((x + y * 32) / 4)
+const tilePaletteAddrIndex = (x, y) => asm`$${
+    (constants.TPALM + Math.floor((x + y * 64) / 4)).toString(16)
 }`;
 
 const print = (s, x, y) => {
@@ -651,11 +682,11 @@ const displayScore = () => print("SCORE:", 1, 0);
 const displayGameOver = () => asm`
 ${print("GAME OVER", 10, 16)}
     lda #%10100000
-    sta ${tilePatternAddrIndex(10, 16)}
+    sta ${tilePaletteAddrIndex(10, 16)}
     lda #%10001010
-    sta ${tilePatternAddrIndex(14, 16)}
+    sta ${tilePaletteAddrIndex(14, 16)}
     lda #%00101010
-    sta ${tilePatternAddrIndex(18, 16)}
+    sta ${tilePaletteAddrIndex(18, 16)}
 `;
 
 const subroutines = () => asm`
@@ -665,15 +696,29 @@ ${displayScore()}
 ${printDecimalNumber("score", 2, 8, 0)}
     rts
 
+shake_screen:
+    SUBROUTINE
+    clc
+    lda SCROLL_X
+    adc #1
+    sta SCROLL_X
+    lda GPU_CONTROL
+    bcc .end
+.set_y_control:
+    ora #%01
+    sta GPU_CONTROL
+.end:
+    rts
+
 print_hi_scores:
     SUBROUTINE
 ${print("HI-SCORES:", 10, 4)}
     lda #%10100000
-    sta ${tilePatternAddrIndex(10, 4)}
+    sta ${tilePaletteAddrIndex(10, 4)}
     lda #%10101000
-    sta ${tilePatternAddrIndex(14, 4)}
+    sta ${tilePaletteAddrIndex(14, 4)}
     lda #%10101010
-    sta ${tilePatternAddrIndex(18, 4)}
+    sta ${tilePaletteAddrIndex(18, 4)}
 ${range(0, constants.HI_SCORE_LEN - 1).map(i => asm`
     lda hi_score_label_one${i == 0 ? "" : "+"+i}
     sta ${tileIndex(10, 6 + i)}
@@ -684,11 +729,11 @@ ${range(0, constants.HI_SCORE_LEN - 1).map(i => asm`
 ${printDecimalNumber(`hi_score_hi${i == 0 ? "" : "+"+i}`, 1, 15, 6 + i)}
 ${printDecimalNumber(`hi_score_lo${i == 0 ? "" : "+"+i}`, 1, 17, 6 + i)}
     lda #%10100000
-    sta ${tilePatternAddrIndex(10, 6 + i)}
+    sta ${tilePaletteAddrIndex(10, 6 + i)}
     lda #%10000010
-    sta ${tilePatternAddrIndex(14, 6 + i)}
+    sta ${tilePaletteAddrIndex(14, 6 + i)}
     lda #%00101010
-    sta ${tilePatternAddrIndex(18, 6 + i)}
+    sta ${tilePaletteAddrIndex(18, 6 + i)}
 `).join('')}
     rts
 
@@ -782,7 +827,7 @@ handle_new_hi_score:
 
 paint_new_hi_score:
     SUBROUTINE
-    lda #TPALM >> 8
+    lda #>TPALM
     sta temp+2
     ldx temp
     lda new_hi_score_palette_addr_lo_table,x
@@ -790,23 +835,29 @@ paint_new_hi_score:
     ldx new_hi_score
     clc
 .loop:
-    adc #8
+    adc #16
+    sta temp+1
+    lda temp+2
+    adc #0
+    sta temp+2
+    lda temp+1
     dex
     bne .loop
 .draw:
-    sta temp+1
-    ldy #0
     ldx temp
     lda new_hi_score_palette_color_table,x
+    ldy #0
     ora (temp+1),y
     sta (temp+1),y
 .end:
     rts
 
 new_hi_score_palette_color_table:
-    byte %00110000, %11000000, %00000011
+    ; byte %00110000, %11000000, %00000011
+    byte ${tilePaletteIndexOf(10, 5).slot_set}, ${tilePaletteIndexOf(11, 5).slot_set}, ${tilePaletteIndexOf(12, 5).slot_set}
 new_hi_score_palette_addr_lo_table:
-    byte (4 * 8 + 10), (4 * 8 + 10), (4 * 8 + 11)
+    ; byte (6 * 16 + 10), (6 * 16 + 10), (6 * 16 + 11)
+    byte ${tilePaletteIndexOf(10, 5).lo}, ${tilePaletteIndexOf(11, 5).lo}, ${tilePaletteIndexOf(12, 5).lo}
 
 game_over:
     SUBROUTINE
@@ -841,6 +892,10 @@ ${displayGameOver()}
 
 restart:
     SUBROUTINE
+    lda #(~ENABLE_TILES & ~ENABLE_SPRITES)
+    and GPU_CONTROL
+    sta GPU_CONTROL
+
 ${controls.init()}
 ${logic.init()}
 
@@ -860,6 +915,10 @@ ${logic.init()}
     jsr init_board
     jsr spawn_apple
 .end:
+    sta VSYNC
+    lda #(ENABLE_TILES | ENABLE_SPRITES)
+    ora GPU_CONTROL
+    sta GPU_CONTROL
     rts
 
 update_hi_score:

@@ -17,6 +17,10 @@ pub fn Module(comptime Impl: type) type {
             return self.memory_map.isMapped(Impl.Addr, addr);
         }
 
+        pub fn slice(self: *const @This(), source: []u8) []u8 {
+            return self.memory_map.slice(source);
+        }
+
         pub fn step(self: *@This()) brk: {
             if (std.meta.hasMethod(Impl, "step")) {
                 break :brk (@typeInfo(@TypeOf(Impl.step)).@"fn".return_type orelse void);

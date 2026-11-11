@@ -8,7 +8,7 @@
   outputs = inputs: {
     devShells = builtins.mapAttrs (system: pkgs: {
       default = pkgs.mkShell {
-        packages = [ pkgs.zig pkgs.zls ];
+        packages = [ pkgs.zig_0_16 pkgs.zls_0_16 ];
       };
     }) inputs.nixpkgs.legacyPackages;
   };

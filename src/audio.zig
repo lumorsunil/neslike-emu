@@ -1,6 +1,7 @@
 const std = @import("std");
 const ifc = @import("interface.zig");
 const rl = @import("raylib");
+const RingBuffer = @import("ring-buffer.zig").RingBuffer;
 
 pub const Audio = struct {
     memory: [memory_len]u8 = undefined,
@@ -158,10 +159,7 @@ pub const Audio = struct {
     pub const audio_buffer_size = 735;
     pub const sample_rate = 44100.0;
     // pub const sample_rate = 2_000_000.0;
-    var ring_buffer: [ring_buffer_size]f32 = undefined;
-    var ring_buffer_read: usize = 0;
-    var ring_buffer_write: usize = 0;
-    const ring_buffer_size = 4096;
+    var ring_buffer = RingBuffer(f32, 4096){};
     const alpha = 0.985;
     const duty_cycle_50: u8 = 0b11110000;
 
@@ -237,35 +235,18 @@ pub const Audio = struct {
         const buffer: [*c]f32 = @ptrCast(@alignCast(buffer_any.?));
 
         for (0..frames) |i| {
-            if (ring_buffer_read != ring_buffer_write) {
-                ring_buffer_read += 1;
-                ring_buffer_read %= ring_buffer_size;
-                buffer[i] = ring_buffer[ring_buffer_read];
-            } else {
+            buffer[i] = ring_buffer.take() orelse {
                 // TODO: fix this? (seems to work though)
                 buffer[i] = 0;
                 // generateAudioData(buffer[i..frames]);
                 break;
-            }
+            };
         }
     }
 
     fn generateAudioDataToRingBuffer(frames: usize) void {
-        const space = if (ring_buffer_read <= ring_buffer_write) (ring_buffer_size - ring_buffer_write - 1 + ring_buffer_read) else ring_buffer_read - ring_buffer_write - 1;
-        const actual_frames = @min(frames, space);
-        ring_buffer_write += 1;
-        ring_buffer_write %= ring_buffer_size;
-        const end_len = @min(ring_buffer.len - ring_buffer_write, actual_frames);
-        const end = ring_buffer_write + end_len;
-        const ring_buffer_end = ring_buffer[ring_buffer_write..end];
-        const rest = actual_frames - end_len;
-        const ring_buffer_start = ring_buffer[0..rest];
-
-        generateAudioData(ring_buffer_end);
-        generateAudioData(ring_buffer_start);
-
-        ring_buffer_write += actual_frames - 1;
-        ring_buffer_write %= ring_buffer_size;
+        var it = ring_buffer.writeableIterator(@truncate(frames), false);
+        while (it.next()) |buffer| generateAudioData(buffer);
     }
 
     fn generateAudioData(buffer: []f32) void {

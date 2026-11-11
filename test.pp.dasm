@@ -1,3 +1,5 @@
+    processor 6502
+
 )§
 utils = await import("./utils.js")
 controls = await import("./controls.js")
@@ -8,13 +10,14 @@ logic = await import("./logic.js")
 font = await import("./font.js")
 )§
 
-    processor 6502
+    include "neslike.inc"
 
     seg.u variables
 ram:
     org $0000
 temp: ds 3
 temp2: ds 3
+temp3: ds 3
 )§ emit(controls.readWriteData()) )§
 )§ emit(logic.readWriteData()) )§
 
@@ -23,9 +26,12 @@ temp2: ds 3
 
     seg code
     org $D000
+    jmp main
 
-    include "neslike.inc"
+    ; seg rwm
+)§ emit(logic.persistentData()) )§
 
+    ; seg code
 main:
 
 )§ emit(graphics.init()) )§
@@ -33,6 +39,12 @@ main:
 )§ emit(controls.init()) )§
 )§ emit(music.init()) )§
 )§ emit(logic.init()) )§
+
+init_done:
+
+    sta VSYNC
+)§ emit(graphics.enable()) )§
+    sta VSYNC
 
 frame:
 
@@ -50,12 +62,8 @@ subroutines:
 )§ emit(logic.subroutines()) )§
 )§ emit(music.subroutines()) )§
 
-    seg rwm
-    org $E000, $00
-)§ emit(logic.persistentData()) )§
-
-    seg rom
-    org $E100
+    ; seg rom
+    ; org $E100
 
 )§ emit(music.readOnlyData()) )§
 )§ emit(graphics.readOnlyData()) )§

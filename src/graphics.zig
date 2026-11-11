@@ -1,7 +1,5 @@
 const std = @import("std");
-const ifc = @import("interface.zig");
 const rl = @import("raylib");
-const UI = @import("ui.zig");
 const Module = @import("module.zig").Module;
 const ModuleCollection = @import("module.zig").ModuleCollection;
 const DirectMemoryAccess = @import("dma.zig").DirectMemoryAccess;
@@ -9,21 +7,23 @@ const DirectMemoryAccess = @import("dma.zig").DirectMemoryAccess;
 // TODO: Universal background color layer (each tile's palette color 0)
 // TODO: Background tile transparency (color 0)
 // TODO: Sprite layers (behind/in front of background tiles)
+// TODO: Scrolling
 pub const Graphics = struct {
     rdy: u1 = 1,
-    /// memory:             0x0000 - 0x2FFF
-    /// tile pattern map:   0x0000 - 0x03FF  (32 * 32 * 8bits)
-    /// tile palette map:   0x0400 - 0x04FF  (32 * 32 * 2bits)
-    /// tile palettes:      0x0500 - 0x050F  (4 * 4 * (6bits + [2bits padding]))
-    /// sprite palettes:    0x0510 - 0x051f  (4 * 4 * (6bits + [2bits padding]))
-    /// tile data:          0x0520 - 0x151f  (256 * 8 * 8 * 2bits) (256 * 16bytes)
-    /// sprite data:        0x1520 - 0x251f  (256 * 8 * 8 * 2bits) (256 * 16bytes)
-    /// sprites             0x2520 - 0x261f  (64 * 32bits)
-    /// tile data pointer:  0x2620 - 0x2621
-    /// sprite data pointer:0x2622 - 0x2623
-    /// vsync               0x2624
-    memory: [memory_len - virtual_memory_len]u8 = undefined,
-    // sprites: [sprites_len]Sprite = undefined,
+    /// label               start  - end    length   notes
+    /// memory:             0x0000 - 0x1FFF (0x2000)
+    /// tile pattern map:   0x0000 - 0x0FFF (0x1000) (32 * 32 * 8bits)
+    /// tile palette map:   0x1000 - 0x13FF (0x0400) (32 * 32 * 2bits)
+    /// tile palettes:      0x1400 - 0x140F (0x0010) (4 * 4 * (6bits + [2bits padding]))
+    /// sprite palettes:    0x1410 - 0x141f (0x0010) (4 * 4 * (6bits + [2bits padding]))
+    /// sprites             0x1420 - 0x151f (0x0100) (64 * 32bits)
+    /// tile data pointer:  0x1520 - 0x1521 (0x0002)
+    /// sprite data pointer:0x1522 - 0x1523 (0x0002)
+    /// vsync               0x1524 - 0x1524 (0x0001)
+    /// scroll x:           0x1525 - 0x1525 (0x0001)
+    /// scroll y:           0x1526 - 0x1526 (0x0001)
+    /// control:            0x1527 - 0x1527 (0x0001)
+    memory: [memory_len]u8 = undefined,
     screen_buffer: rl.RenderTexture2D = undefined,
     background_layer_buffer: rl.RenderTexture2D = undefined,
     background_render_queue: std.bit_set.ArrayBitSet(usize, tiles_len) = .empty,
@@ -33,28 +33,28 @@ pub const Graphics = struct {
         TilePaletteMap,
         TilePaletteData,
         SpritePaletteData,
-        TileData,
-        SpriteData,
         SpriteMap,
         TileDataPointer,
         SpriteDataPointer,
         VsyncModule,
+        ScrollX,
+        ScrollY,
+        Control,
     }) = .init(.{
         .init(0), // tile pattern map
-        .init(0x0400), // tile palette map
-        .init(0x0500), // tile palette data
-        .init(0x0510), // sprite palette data
-        .init(0x0520), // tile data
-        .init(0x1520), // sprite data
-        .init(0x2520), // sprite map
-        .init(0x2620), // tile data pointer
-        .init(0x2622), // sprite data pointer
-        .init(0x2624), // vsync
+        .init(0x1000), // tile palette map
+        .init(0x1400), // tile palette data
+        .init(0x1410), // sprite palette data
+        .init(0x1420), // sprite map
+        .init(0x1520), // tile data pointer
+        .init(0x1522), // sprite data pointer
+        .init(0x1524), // vsync
+        .init(0x1525), // scroll x
+        .init(0x1526), // scroll y
+        .init(0x1527), // control
     }),
 
-    // const screen_scale = 2;
     const screen_src = rl.Rectangle.init(0, 0, 256, -256);
-    // const screen_dst = rl.Rectangle.init(UI.screen_size[0] - 256 * screen_scale, 0, 256 * screen_scale, 256 * screen_scale);
 
     const master_palette = [64]rl.Color{
         .init(0x54, 0x54, 0x54, 0xFF), //  0 (84, 84, 84) — Medium Dark Gray
@@ -124,15 +124,10 @@ pub const Graphics = struct {
     };
 
     pub const Addr = std.math.IntFittingRange(0, memory_len - 1);
-    pub const memory_len = 12292 + virtual_memory_len;
-    const vsync = 0x2624;
-    const virtual_memory_len = 1;
-    const sprites_len = 64;
-    const tile_cols = 32;
-    const tile_rows = 32;
+    pub const memory_len = 0x2000;
+    const tile_cols = 32 * 2;
+    const tile_rows = 32 * 2;
     const tiles_len = tile_cols * tile_rows;
-    const TileQueueInt = std.math.IntFittingRange(0, tiles_len - 1);
-    const tile_size = @Vector(2, u8){ 8, 8 };
 
     pub fn stepFrame(self: *@This()) Error!void {
         self.consumeTileQueue();
@@ -159,8 +154,8 @@ pub const Graphics = struct {
 
     fn renderTile(self: *@This(), addr: Addr) void {
         // self.render_buffer.begin();
-        const col: u8 = @truncate(addr % tile_cols);
-        const row: u8 = @truncate(@divFloor(addr, tile_cols));
+        const col: u9 = @truncate(addr % tile_cols);
+        const row: u9 = @truncate(@divFloor(addr, tile_cols));
         self.drawTile(col, row, col * 8, row * 8);
         // self.render_buffer.end();
     }
@@ -170,6 +165,9 @@ pub const Graphics = struct {
     }
 
     fn consumeTileQueue(self: *@This()) void {
+        const control: ControlByte = @bitCast(self.getModule(.control).slice(&self.memory)[0]);
+        if (control.enable_tiles == 0) return;
+
         self.background_layer_buffer.begin();
         var it = self.background_render_queue.iterator(.{});
         while (it.next()) |index| {
@@ -216,27 +214,42 @@ pub const Graphics = struct {
     }
 
     fn drawBackgroundLayer(self: *@This()) void {
-        const src = rl.Rectangle.init(0, 0, 256, -256);
+        const control: ControlByte = @bitCast(self.getModule(.control).slice(&self.memory)[0]);
+        if (control.enable_tiles == 0) {
+            rl.clearBackground(.black);
+            return;
+        }
+
+        var scroll_x: f32 = self.getModule(.scroll_x).slice(&self.memory)[0];
+        var scroll_y: f32 = self.getModule(.scroll_y).slice(&self.memory)[0];
+
+        scroll_x += @as(u9, control.x9) << 8;
+        scroll_y += @as(u9, control.y9) << 8;
+
+        const src = rl.Rectangle.init(scroll_x, 256 - scroll_y, 256, -256);
         const dst = rl.Rectangle.init(0, 0, 256, 256);
         rl.drawTexturePro(self.background_layer_buffer.texture, src, dst, .zero(), 0, .white);
     }
 
-    fn drawTile(self: *@This(), col: u16, row: u16, offset_x: u8, offset_y: u8) void {
+    fn drawTile(self: *@This(), col: u16, row: u16, offset_x: u9, offset_y: u9) void {
         const i = col + row * tile_cols;
         const tile_index = self.tileMap()[i];
         const pi = @divFloor(i, 4);
         const tile_palette_index: u2 = @truncate(self.tilePaletteMap()[pi] >> @truncate((i % 4) * 2));
         const tile_palette = self.tilePalettes()[@as(u16, tile_palette_index) * 4 .. @as(u16, tile_palette_index) * 4 + 4];
         const tile_data_pointer = self.getModule(.tileDataPointer);
+        const tile_data_pointer_mem = tile_data_pointer.memory_map.slice(&self.memory);
+        const addr_lo: u16 = tile_data_pointer_mem[0];
+        const addr_hi: u16 = tile_data_pointer_mem[1];
+        const tile_data_base_addr: u16 = addr_lo + (addr_hi << 8);
 
         for (0..8) |tile_data_row| {
             for (0..2) |tile_data_row_side| {
-                // const data = self.tileData()[@as(u16, tile_index) * 16 + tile_data_row * 2 + tile_data_row_side];
-                const tile_data_pointer_mem = tile_data_pointer.memory_map.slice(&self.memory);
-                const addr_lo: u16 = tile_data_pointer_mem[0];
-                const addr_hi: u16 = tile_data_pointer_mem[1];
-                const addr_offset: u16 = @as(u16, tile_index) * 16 + @as(u16, @intCast(tile_data_row)) * 2 + @as(u16, @intCast(tile_data_row_side));
-                const data = self.dma.read(addr_lo + (addr_hi << 8) + addr_offset) catch unreachable;
+                const tile_index_addr_offset: u16 = @as(u16, tile_index) * 16;
+                const tile_data_row_addr_offset: u16 = @as(u16, @intCast(tile_data_row)) * 2;
+                const tile_data_side_addr_offset: u16 = @intCast(tile_data_row_side);
+                const addr_offset: u16 = tile_index_addr_offset + tile_data_row_addr_offset + tile_data_side_addr_offset;
+                const data = self.dma.read(tile_data_base_addr + addr_offset) catch unreachable;
 
                 for (0..4) |pixel| {
                     const palette_color: u2 = @truncate(data >> @truncate(pixel * 2));
@@ -253,6 +266,9 @@ pub const Graphics = struct {
     }
 
     fn drawSprites(self: *@This()) void {
+        const control: ControlByte = @bitCast(self.getModule(.control).slice(&self.memory)[0]);
+        if (control.enable_sprites == 0) return;
+
         for (self.getSprites()) |sprite| {
             if (sprite.enabled == 0) continue;
             self.drawSprite(sprite);
@@ -265,12 +281,11 @@ pub const Graphics = struct {
         const palette = self.spritePalettes()[pi * pw .. pi * pw + pw];
         const sprite_data_pointer = self.getModule(.spriteDataPointer);
         const sprite_data_pointer_mem = sprite_data_pointer.memory_map.slice(&self.memory);
+        const addr_lo: u16 = sprite_data_pointer_mem[0];
+        const addr_hi: u16 = sprite_data_pointer_mem[1];
 
         for (0..8) |tile_data_row| {
             for (0..2) |tile_data_row_side| {
-                // const data = self.spriteData()[@as(u16, sprite.tile_index) * 16 + tile_data_row * 2 + tile_data_row_side];
-                const addr_lo: u16 = sprite_data_pointer_mem[0];
-                const addr_hi: u16 = sprite_data_pointer_mem[1];
                 const addr_offset: u16 = @as(u16, sprite.tile_index) * 16 + @as(u16, @intCast(tile_data_row)) * 2 + @as(u16, @intCast(tile_data_row_side));
                 const data = self.dma.read(addr_lo + (addr_hi << 8) + addr_offset) catch unreachable;
 
@@ -295,7 +310,20 @@ pub const Graphics = struct {
         }
     }
 
-    const SubModuleTag = enum { tilePatternMap, spriteMap, tilePaletteMap, tileData, spriteData, spritePaletteData, tilePaletteData, tileDataPointer, spriteDataPointer };
+    pub const SubModuleTag = enum {
+        tilePatternMap,
+        spriteMap,
+        tilePaletteMap,
+        tileData,
+        spriteData,
+        spritePaletteData,
+        tilePaletteData,
+        tileDataPointer,
+        spriteDataPointer,
+        scroll_x,
+        scroll_y,
+        control,
+    };
     const sub_module_map = std.enums.EnumFieldStruct(SubModuleTag, type, null){
         .tilePatternMap = TilePatternMap,
         .spriteMap = SpriteMap,
@@ -306,6 +334,9 @@ pub const Graphics = struct {
         .tilePaletteData = TilePaletteData,
         .tileDataPointer = TileDataPointer,
         .spriteDataPointer = SpriteDataPointer,
+        .scroll_x = ScrollX,
+        .scroll_y = ScrollY,
+        .control = Control,
     };
 
     pub fn getModule(self: *@This(), comptime sub_module: SubModuleTag) *Module(@field(sub_module_map, @tagName(sub_module))) {
@@ -337,6 +368,14 @@ pub const Graphics = struct {
         },
         enabled: u1,
         _: u2,
+    };
+
+    const ControlByte = packed struct(u8) {
+        x9: u1 = 0,
+        y9: u1 = 0,
+        enable_tiles: u1 = 1,
+        enable_sprites: u1 = 1,
+        _: u4 = 0,
     };
 
     pub const Error = error{};
@@ -374,13 +413,13 @@ pub fn writerWrite(ctx: WriteContext) void {
     ctx.graphics.memory[ctx.addr] = ctx.data;
 }
 
-const TilePatternMap = VirtualModule("TilePatternMap", 0x0400, tilePatternMapWrite);
+const TilePatternMap = VirtualModule("TilePatternMap", 0x1000, tilePatternMapWrite);
 pub fn tilePatternMapWrite(ctx: WriteContext) void {
     ctx.graphics.memory[ctx.addr] = ctx.data;
     ctx.graphics.queueTile(@intCast(ctx.rel_addr));
 }
 
-const TilePaletteMap = VirtualModule("TilePaletteMap", 0x0100, tilePaletteMapWrite);
+const TilePaletteMap = VirtualModule("TilePaletteMap", 0x0400, tilePaletteMapWrite);
 pub fn tilePaletteMapWrite(ctx: WriteContext) void {
     ctx.graphics.memory[ctx.addr] = ctx.data;
     for (0..4) |i| ctx.graphics.queueTile(@intCast(ctx.rel_addr * 4 + @as(u16, @truncate(i))));
@@ -393,6 +432,9 @@ const SpriteData = WriterModule("SpriteData", 0x1000);
 const SpriteMap = WriterModule("SpriteMap", 0x0100);
 pub const TileDataPointer = WriterModule("TileDataPointer", 0x0002);
 pub const SpriteDataPointer = WriterModule("SpriteDataPointer", 0x0002);
+const ScrollX = WriterModule("ScrollX", 0x0001);
+const ScrollY = WriterModule("ScrollY", 0x0001);
+const Control = WriterModule("Control", 0x0001);
 
 const VsyncModule = VirtualModule("Vsync", 1, writeVsync);
 fn writeVsync(ctx: WriteContext) void {

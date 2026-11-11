@@ -196,4 +196,80 @@ const intersperse = (arr, delim) =>
     return index === 0 ? [curr] : [...acc, delim, curr];
   }, []);
 
-export { repeat, range, tile, mkNote, notes, noteTable, intersperse };
+const printString = (s) => {
+    let result = "";
+
+    result += asm`
+    lda #PRINT_MODE_ASCII
+    sta PRINT_MODE`;
+
+    result += s.split('').map(c => asm`
+    lda #'${c}
+    sta PRINT_WRITE`).join('');
+
+    return result;
+};
+
+const printu16 = (s) => {
+    let result = "";
+
+    result += asm`
+    lda #PRINT_MODE_U16_HEX
+    sta PRINT_MODE
+    lda ${s}
+    sta PRINT_WRITE
+    lda ${s}+1
+    sta PRINT_WRITE`;
+
+    return result;
+};
+
+const printu24 = (s) => {
+    let result = "";
+
+    result += asm`
+    lda #PRINT_MODE_U24_DEC
+    sta PRINT_MODE
+    lda ${s}
+    sta PRINT_WRITE
+    lda ${s}+1
+    sta PRINT_WRITE
+    lda ${s}+2
+    sta PRINT_WRITE`;
+
+    return result;
+};
+
+const printu40 = (s) => {
+    let result = "";
+
+    result += asm`
+    lda #PRINT_MODE_U40_DEC
+    sta PRINT_MODE
+    lda ${s}
+    sta PRINT_WRITE
+    lda ${s}+1
+    sta PRINT_WRITE
+    lda ${s}+2
+    sta PRINT_WRITE
+    lda ${s}+3
+    sta PRINT_WRITE
+    lda ${s}+4
+    sta PRINT_WRITE`;
+
+    return result;
+};
+
+const printNewLine = () => {
+    let result = "";
+
+    result += asm`
+    lda #PRINT_MODE_ASCII
+    sta PRINT_MODE
+    lda #$0A
+    sta PRINT_WRITE`;
+
+    return result;
+};
+
+export { repeat, range, tile, mkNote, notes, noteTable, intersperse, printString, printu16, printu24, printu40, printNewLine};

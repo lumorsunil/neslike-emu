@@ -7,17 +7,32 @@ const init = () => asm`
 init_graphics:
     SUBROUTINE
 
+.init_gpu:
+    lda #0
+    sta SCROLL_X
+    sta SCROLL_Y
+    sta GPU_CONTROL
+
 .set_tile_data_pointer:
     lda #<tile_data
-    sta $2a20
+    sta TDATP_LO
     lda #>tile_data
-    sta $2a21
+    sta TDATP_HI
 
 .set_sprite_data_pointer:
     lda #<sprite_data
-    sta $2a22
+    sta SDATP_LO
     lda #>sprite_data
-    sta $2a23
+    sta SDATP_HI
+
+.init_sprites:
+    lda #0
+    ldx #$FF
+.init_sprites_loop:
+    sta SMAP,x
+    dex
+    bne .init_sprites_loop
+    sta SMAP,x
 
 .init_tile_palette_data:
     ldx #tile_palette_data_size-1
@@ -36,15 +51,16 @@ init_graphics:
     bpl .sprite_palette_data_store
 
     jsr init_board
+`;
 
-.init_sprites:
-    lda #0
-    ldx #$FF
-.init_sprites_loop:
-    sta SMAP,x
-    dex
-    bne .init_sprites_loop
-    sta SMAP,x
+const enable = () => asm`
+graphics_enable:
+    SUBROUTINE
+    lda #ENABLE_TILES
+    ora #ENABLE_SPRITES
+    ora GPU_CONTROL
+    sta GPU_CONTROL ; GPU_CONTROL |= ENABLE_TILES | ENABLE_SPRITES
+.end:
 `;
 
 const readOnlyData = () => asm`
@@ -193,43 +209,45 @@ const subroutines = () => asm`
 init_board:
     SUBROUTINE
 .init_tile_map:
+    lda #<TPATM
+    sta temp
+    lda #>TPATM
+    sta temp+1
+
     lda #$00
-    ldx #$FF
+    ldx #$10
+.loop:
+    ldy #$FF
 .init_tile_map_loop_0:
-    sta TPATM,x
-    dex
+    sta (temp),y
+    dey
     bne .init_tile_map_loop_0
-    sta TPATM,x
-
-    ldx #$FF
-.init_tile_map_loop_1:
-    sta TPATM+$100,x
+    sta (temp),y
+.continue:
+    inc temp+1
     dex
-    bne .init_tile_map_loop_1
-    sta TPATM+$100,x
-
-    ldx #$FF
-.init_tile_map_loop_2:
-    sta TPATM+$200,x
-    dex
-    bne .init_tile_map_loop_2
-    sta TPATM+$200,x
-
-    ldx #$FF
-.init_tile_map_loop_3:
-    sta TPATM+$300,x
-    dex
-    bne .init_tile_map_loop_3
-    sta TPATM+$300,x
+    bne .loop
 
 .init_tile_palettes:
+    lda #<TPALM
+    sta temp
+    lda #>TPALM
+    sta temp+1
+
     lda #$00
-    ldx #$FF
+    ldx #$04
+.init_tile_palettes_page_loop:
+    ldy #$FF
 .init_tile_palettes_loop:
-    sta TPALM,x
-    dex
+    sta (temp),y
+    dey
     bne .init_tile_palettes_loop
-    sta TPALM,x
+    sta (temp),y
+.init_tile_palettes_loop_continue:
+    inc temp+1
+    dex
+    bne .init_tile_palettes_page_loop
+
 .init_ui_tile_palettes:
     lda #$AA
     ldx #$07
@@ -250,4 +268,4 @@ init_board:
     rts
 `;
 
-export { init, readOnlyData, subroutines };
+export { init, readOnlyData, subroutines, enable };

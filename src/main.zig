@@ -2,291 +2,26 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Io = std.Io;
 const rl = @import("raylib");
-const ifc = @import("interface.zig");
-const Byte = ifc.Byte;
 const Computer = @import("computer.zig").Computer;
-const Memory = @import("memory.zig").Memory;
-const Controller = @import("controller.zig").Controller;
 const Startup = @import("startup.zig").Startup;
-const Graphics = @import("graphics.zig").Graphics;
-const TileDataPointer = @import("graphics.zig").TileDataPointer;
 const Audio = @import("audio.zig").Audio;
-const Drive = @import("drive.zig").Drive;
 const Randomizer = @import("randomizer.zig").Randomizer;
+const Printer = @import("printer.zig").Printer;
 const Debug = @import("debug.zig").Debug;
-const MemoryMap = @import("memory-map.zig").MemoryMap;
 const UI = @import("ui.zig");
 const BinaryPatch = @import("binary-patch.zig").BinaryPatch;
-const MOS6502 = @import("6502.zig");
-
-const tile = [16]u8{
-    0b00_00_00_00, 0b00_00_00_00,
-    0b01_01_01_00, 0b00_01_01_01,
-    0b10_10_01_00, 0b00_01_10_10,
-    0b11_10_01_00, 0b00_01_10_11,
-    0b11_10_01_00, 0b00_01_10_11,
-    0b10_10_01_00, 0b00_01_10_10,
-    0b01_01_01_00, 0b00_01_01_01,
-    0b00_00_00_00, 0b00_00_00_00,
-};
-
-const tile2 = [16]u8{
-    0b00_00_00_00, 0b00_00_00_00,
-    0b00_01_01_01, 0b01_01_01_00,
-    0b00_01_10_10, 0b10_10_01_00,
-    0b00_01_10_11, 0b11_10_01_00,
-    0b00_01_10_11, 0b11_10_01_00,
-    0b00_01_10_10, 0b10_10_01_00,
-    0b00_01_01_01, 0b01_01_01_00,
-    0b00_00_00_00, 0b00_00_00_00,
-};
+const UIDebugContext = @import("ui-debug.zig").UIDebugContext;
+const formatDate = @import("date.zig").formatDate;
 
 const input_file_path = "test.bin";
-
-pub fn main(init: std.process.Init) !void {
-    var ctx: MainContext = undefined;
-    try initEmu(init.io, init.gpa, &ctx);
-    defer deinitEmu(init.gpa, &ctx);
-
-    while (!rl.windowShouldClose()) {
-        try loop(&ctx);
-    }
-
-    const cartridge = ctx.file;
-    const drive = ctx.computer.modules.get(Drive).chip.memory[0..cartridge.len];
-    try BinaryPatch.save(init.io, cartridge, drive, input_file_path);
-}
-
-fn initEmu(io: std.Io, allocator: Allocator, ctx: *MainContext) !void {
-    rl.initWindow(UI.screen_size[0], UI.screen_size[1], "Core Killer");
-    rl.initAudioDevice();
-    rl.setWindowFocused();
-    rl.setWindowPosition(24, 24);
-    // rl.setTargetFPS(60 * 2);
-
-    var binary_patch_allocating_writer = std.Io.Writer.Allocating.init(allocator);
-    errdefer binary_patch_allocating_writer.deinit();
-
-    BinaryPatch.load(io, &binary_patch_allocating_writer.writer, input_file_path) catch |err| switch (err) {
-        std.Io.File.OpenError.FileNotFound => {},
-        else => return err,
-    };
-
-    const file = try std.Io.Dir.cwd().readFileAlloc(io, input_file_path, allocator, .unlimited);
-    errdefer allocator.free(file);
-
-    ctx.* = MainContext{
-        .random = std.Random.IoSource{ .io = io },
-        .file = file,
-        .binary_patch = try binary_patch_allocating_writer.toOwnedSlice(),
-        .font = try rl.loadFont("Ac437_IBM_VGA_8x14.ttf"),
-    };
-
-    initStartupChip(ctx);
-    initMemoryChip(ctx);
-    try initDriveChip(ctx);
-    initRandomizerChip(ctx);
-    try initGraphicsChip(ctx);
-    try initMemoryRenderBuffers(ctx);
-    try initTextures(ctx);
-    try initAudio(ctx);
-    initDebugChip(ctx);
-
-    drawMemoryRenderBufferBackgrounds(ctx);
-}
-
-fn deinitEmu(allocator: Allocator, ctx: *MainContext) void {
-    allocator.free(ctx.file);
-    allocator.free(ctx.binary_patch);
-    rl.closeWindow();
-    rl.closeAudioDevice();
-}
-
-fn restartComputer(ctx: *MainContext) !void {
-    ctx.is_continuing = false;
-    restartCpuChip(ctx);
-    restartStartupChip(ctx);
-    restartMemoryChip(ctx);
-    try restartDriveChip(ctx);
-    restartRandomizerChip(ctx);
-    restartGraphicsChip(ctx);
-    restartAudio(ctx);
-    restartDebugChip(ctx);
-
-    drawMemoryRenderBufferBackgrounds(ctx);
-}
-
-fn restartCpuChip(ctx: *MainContext) void {
-    ctx.computer.cpu = .{};
-}
-
-fn initStartupChip(ctx: *MainContext) void {
-    restartStartupChip(ctx);
-}
-
-fn restartStartupChip(ctx: *MainContext) void {
-    ctx.computer.modules.get(Startup).chip.memory[0] = 0x00;
-    ctx.computer.modules.get(Startup).chip.memory[1] = 0xD0;
-}
-
-fn initMemoryChip(ctx: *MainContext) void {
-    restartMemoryChip(ctx);
-}
-
-fn restartMemoryChip(ctx: *MainContext) void {
-    ctx.random.interface().bytes(&ctx.computer.modules.get(Memory).chip.memory);
-}
-
-fn initDriveChip(ctx: *MainContext) !void {
-    try restartDriveChip(ctx);
-}
-
-fn restartDriveChip(ctx: *MainContext) !void {
-    const drive_memory = ctx.computer.modules.get(Drive).chip.memory[0..ctx.file.len];
-    @memcpy(drive_memory, ctx.file);
-    try BinaryPatch.deserialize(drive_memory, ctx.binary_patch);
-}
-
-fn initRandomizerChip(ctx: *MainContext) void {
-    restartRandomizerChip(ctx);
-}
-
-fn restartRandomizerChip(ctx: *MainContext) void {
-    ctx.computer.modules.get(Randomizer).chip.random = .init(ctx.random.interface().int(u64));
-}
-
-fn initGraphicsChip(ctx: *MainContext) !void {
-    const graphics = ctx.computer.modules.get(Graphics);
-
-    graphics.chip.dma = .{ .computer = &ctx.computer };
-    graphics.chip.screen_buffer = try rl.loadRenderTexture(256, 256);
-    graphics.chip.background_layer_buffer = try rl.loadRenderTexture(256, 256);
-
-    restartGraphicsChip(ctx);
-}
-
-fn restartGraphicsChip(ctx: *MainContext) void {
-    const graphics = ctx.computer.modules.get(Graphics);
-    ctx.random.interface().bytes(&graphics.chip.memory);
-
-    drawRandomPixels(ctx, graphics.chip.screen_buffer);
-    drawRandomPixels(ctx, graphics.chip.background_layer_buffer);
-
-    graphics.chip.memory[0x2620] = 0x20;
-    graphics.chip.memory[0x2621] = 0x09;
-    graphics.chip.memory[0x2622] = 0x20;
-    graphics.chip.memory[0x2623] = 0x19;
-}
-
-fn drawRandomPixels(ctx: *MainContext, render_texture: rl.RenderTexture2D) void {
-    render_texture.begin();
-    for (0..@intCast(render_texture.texture.width)) |x| {
-        for (0..@intCast(render_texture.texture.height)) |y| {
-            const r = ctx.random.interface().int(u8);
-            const color = rl.Color.init(r, r, r, 0xFF);
-            rl.drawPixel(@intCast(x), @intCast(y), color);
-        }
-    }
-    render_texture.end();
-}
-
-fn initTextures(ctx: *MainContext) !void {
-    ctx.textures = Textures{
-        .directional_button = try rl.loadRenderTexture(4, 4),
-        .directional_button_src = rl.Rectangle.init(0, 0, 4, -4),
-        .button = try rl.loadRenderTexture(4, 4),
-        .button_src = rl.Rectangle.init(0, 0, 4, -4),
-    };
-
-    ctx.textures.directional_button.begin();
-    for (0..4) |x| {
-        for (0..4) |y| {
-            if (y == 0 and (x == 0 or x == 3)) continue;
-            rl.drawPixel(@intCast(x), @intCast(y), .white);
-        }
-    }
-    ctx.textures.directional_button.end();
-
-    ctx.textures.button.begin();
-    for (0..4) |x| {
-        for (0..4) |y| {
-            if (y == 0 and (x == 0 or x == 3)) continue;
-            if (y == 3 and (x == 0 or x == 3)) continue;
-            rl.drawPixel(@intCast(x), @intCast(y), .white);
-        }
-    }
-    ctx.textures.button.end();
-}
-
-fn initAudio(ctx: *MainContext) !void {
-    const audio = ctx.computer.modules.get(Audio);
-    // rl.setAudioStreamBufferSizeDefault(Audio.audio_buffer_size);
-    audio.chip.audio_stream = try rl.loadAudioStream(Audio.sample_rate, 32, 1);
-    Audio.self_ = &audio.chip;
-    rl.setAudioStreamCallback(audio.chip.audio_stream, Audio.audioStreamCallback);
-    // rl.attachAudioStreamProcessor(audio.chip.audio_stream, Audio.audioStreamCallback);
-    ctx.random.interface().bytes(&audio.chip.noise_lut);
-    rl.playAudioStream(audio.chip.audio_stream);
-    rl.setMasterVolume(0.5);
-    restartAudio(ctx);
-}
-
-fn restartAudio(ctx: *MainContext) void {
-    const audio = ctx.computer.modules.get(Audio);
-    audio.chip.initMemory();
-}
-
-fn initDebugChip(ctx: *MainContext) void {
-    restartDebugChip(ctx);
-}
-
-fn restartDebugChip(ctx: *MainContext) void {
-    ctx.computer.modules.get(Debug).chip.cpu = &ctx.computer.cpu;
-}
-
-fn initMemoryRenderBuffers(ctx: *MainContext) !void {
-    ctx.memory_render_buffer = try rl.loadRenderTexture(UI.memory_cell_cols * 3, UI.memory_cell_rows * 3);
-    ctx.memory_src = rl.Rectangle.init(0, 0, @floatFromInt(ctx.memory_render_buffer.texture.width), @floatFromInt(-ctx.memory_render_buffer.texture.height));
-    ctx.memory_dst = rl.Rectangle.init(UI.memory_offset[0], UI.memory_offset[1], ctx.memory_src.width * ctx.memory_scale, ctx.memory_src.height * ctx.memory_scale);
-
-    ctx.sprite_map_render_buffer = try rl.loadRenderTexture(UI.sprite_map_cell_cols * 3, UI.sprite_map_cell_rows * 3);
-    ctx.sprite_map_src = rl.Rectangle.init(0, 0, @floatFromInt(ctx.sprite_map_render_buffer.texture.width), @floatFromInt(-ctx.sprite_map_render_buffer.texture.height));
-    ctx.sprite_map_dst = rl.Rectangle.init(UI.sprite_map_offset[0], UI.sprite_map_offset[1], ctx.sprite_map_src.width * ctx.sprite_map_scale, ctx.sprite_map_src.height * ctx.sprite_map_scale);
-
-    ctx.tile_map_render_buffer = try rl.loadRenderTexture(UI.tile_map_cell_cols * 3, UI.tile_map_cell_rows * 3);
-    ctx.tile_map_src = rl.Rectangle.init(0, 0, @floatFromInt(ctx.tile_map_render_buffer.texture.width), @floatFromInt(-ctx.tile_map_render_buffer.texture.height));
-    ctx.tile_map_dst = rl.Rectangle.init(UI.tile_map_offset[0], UI.tile_map_offset[1], ctx.tile_map_src.width * ctx.tile_map_scale, ctx.tile_map_src.height * ctx.tile_map_scale);
-
-    ctx.tile_palette_map_render_buffer = try rl.loadRenderTexture(UI.tile_palette_map_cell_cols * 3, UI.tile_palette_map_cell_rows * 3);
-    ctx.tile_palette_map_src = rl.Rectangle.init(0, 0, @floatFromInt(ctx.tile_palette_map_render_buffer.texture.width), @floatFromInt(-ctx.tile_palette_map_render_buffer.texture.height));
-    ctx.tile_palette_map_dst = rl.Rectangle.init(UI.tile_palette_map_offset[0], UI.tile_palette_map_offset[1], ctx.tile_palette_map_src.width * ctx.tile_palette_map_scale, ctx.tile_palette_map_src.height * ctx.tile_palette_map_scale);
-}
-
-fn drawMemoryRenderBufferBackgrounds(ctx: *MainContext) void {
-    ctx.memory_render_buffer.begin();
-    // ctx.computer.modules.get(Memory).write_events = .full;
-    drawMemoryAsCells(&ctx.computer, true);
-    ctx.memory_render_buffer.end();
-
-    ctx.sprite_map_render_buffer.begin();
-    drawSpriteMapAsCells(&ctx.computer, true);
-    ctx.sprite_map_render_buffer.end();
-
-    ctx.tile_map_render_buffer.begin();
-    drawTileMapAsCells(&ctx.computer, true);
-    ctx.tile_map_render_buffer.end();
-
-    ctx.tile_palette_map_render_buffer.begin();
-    drawTilePaletteMapAsCells(&ctx.computer, true);
-    ctx.tile_palette_map_render_buffer.end();
-}
+const input_hard_drive_path = "drive.bin";
+const printer_file_path = "printer.txt";
 
 const MainContext = struct {
-    is_continuing: bool = false,
-    is_fullscreen: bool = true,
-    font: rl.Font,
     file: []const u8,
     binary_patch: []const u8,
+    hard_drive: []const u8,
+    printer_writer: *std.Io.Writer,
     random: std.Random.IoSource,
     computer: Computer = .{},
 
@@ -326,34 +61,242 @@ const MainContext = struct {
         }
     } = .{},
 
-    textures: Textures = undefined,
-
-    memory_render_buffer: rl.RenderTexture2D = undefined,
-    memory_scale: f32 = 3,
-    memory_src: rl.Rectangle = undefined,
-    memory_dst: rl.Rectangle = undefined,
-
-    sprite_map_render_buffer: rl.RenderTexture2D = undefined,
-    sprite_map_scale: f32 = 3,
-    sprite_map_src: rl.Rectangle = undefined,
-    sprite_map_dst: rl.Rectangle = undefined,
-
-    tile_map_render_buffer: rl.RenderTexture2D = undefined,
-    tile_map_scale: f32 = 3,
-    tile_map_src: rl.Rectangle = undefined,
-    tile_map_dst: rl.Rectangle = undefined,
-
-    tile_palette_map_render_buffer: rl.RenderTexture2D = undefined,
-    tile_palette_map_scale: f32 = 3,
-    tile_palette_map_src: rl.Rectangle = undefined,
-    tile_palette_map_dst: rl.Rectangle = undefined,
+    ui_debug: UIDebugContext,
 };
+
+pub fn main(init: std.process.Init) !void {
+    const printer_file = try std.Io.Dir.cwd().createFile(init.io, printer_file_path, .{
+        .truncate = false,
+        .read = true,
+    });
+    defer printer_file.close(init.io);
+    const printer_file_len = try printer_file.length(init.io);
+    var printer_file_writer = printer_file.writer(init.io, &.{});
+    try printer_file_writer.seekTo(printer_file_len);
+    const printer_writer = &printer_file_writer.interface;
+
+    if (printer_file_len > 4) {
+        try printer_writer.writeAll("\n\n");
+    }
+
+    const now = std.Io.Timestamp.now(init.io, .real);
+    try printer_writer.print("{f}:\n\n", .{std.fmt.Alt(@TypeOf(now), formatDate){ .data = now }});
+
+    var ctx: MainContext = undefined;
+    ctx.printer_writer = printer_writer;
+    try initEmu(init.io, init.gpa, &ctx);
+    defer deinitEmu(init.gpa, &ctx);
+
+    while (!rl.windowShouldClose()) {
+        try loop(&ctx);
+    }
+
+    const cartridge_source = ctx.file;
+    const cartridge_modified = ctx.computer.modules.get(Computer.CartridgeSlot).chip.memory[0..cartridge_source.len];
+    try BinaryPatch.save(init.io, cartridge_source, cartridge_modified, input_file_path);
+
+    const hard_drive_modified = &ctx.computer.modules.get(Computer.HardDrive).chip.memory;
+    try std.Io.Dir.cwd().writeFile(init.io, .{ .flags = .{}, .sub_path = input_hard_drive_path, .data = hard_drive_modified });
+}
+
+fn initEmu(io: std.Io, allocator: Allocator, ctx: *MainContext) !void {
+    rl.initWindow(UI.screen_size[0], UI.screen_size[1], "Core Killer");
+    rl.initAudioDevice();
+    rl.setWindowFocused();
+    rl.setWindowPosition(24, 24);
+    // rl.setTargetFPS(60 * 2);
+
+    var binary_patch_allocating_writer = std.Io.Writer.Allocating.init(allocator);
+    errdefer binary_patch_allocating_writer.deinit();
+
+    BinaryPatch.load(io, &binary_patch_allocating_writer.writer, input_file_path) catch |err| switch (err) {
+        std.Io.File.OpenError.FileNotFound => {},
+        else => return err,
+    };
+
+    const file = try std.Io.Dir.cwd().readFileAlloc(io, input_file_path, allocator, .unlimited);
+    errdefer allocator.free(file);
+
+    const hard_drive = std.Io.Dir.cwd().readFileAlloc(io, input_hard_drive_path, allocator, .unlimited) catch |err| switch (err) {
+        std.Io.File.OpenError.FileNotFound => &.{},
+        else => return err,
+    };
+    errdefer allocator.free(hard_drive);
+
+    ctx.* = MainContext{
+        .random = std.Random.IoSource{ .io = io },
+        .file = file,
+        .binary_patch = try binary_patch_allocating_writer.toOwnedSlice(),
+        .hard_drive = hard_drive,
+        .printer_writer = ctx.printer_writer,
+        .ui_debug = .{
+            .computer = &ctx.computer,
+            .render_buffers = undefined,
+            .is_continuing = false,
+            .is_fullscreen = true,
+            .font = try rl.loadFont("Ac437_IBM_VGA_8x14.ttf"),
+        },
+    };
+
+    initStartupChip(ctx);
+    initMemoryChip(ctx);
+    initHardDriveChip(ctx);
+    try initCartridgeChip(ctx);
+    initRandomizerChip(ctx);
+    initPrinterChip(ctx);
+    try initGraphicsChip(ctx);
+    try initAudio(ctx);
+    initDebugChip(ctx);
+
+    try ctx.ui_debug.init();
+}
+
+fn deinitEmu(allocator: Allocator, ctx: *MainContext) void {
+    allocator.free(ctx.file);
+    allocator.free(ctx.binary_patch);
+    allocator.free(ctx.hard_drive);
+    rl.closeWindow();
+    rl.closeAudioDevice();
+}
+
+fn restartComputer(ctx: *MainContext) !void {
+    restartCpuChip(ctx);
+    restartStartupChip(ctx);
+    restartMemoryChip(ctx);
+    restartHardDriveChip(ctx);
+    try restartCartridgeChip(ctx);
+    restartRandomizerChip(ctx);
+    restartGraphicsChip(ctx);
+    restartAudio(ctx);
+    restartDebugChip(ctx);
+
+    ctx.ui_debug.restart();
+}
+
+fn restartCpuChip(ctx: *MainContext) void {
+    ctx.computer.cpu = .{};
+}
+
+fn initStartupChip(ctx: *MainContext) void {
+    restartStartupChip(ctx);
+}
+
+fn restartStartupChip(ctx: *MainContext) void {
+    ctx.computer.modules.get(Startup).chip.memory[0] = 0x00;
+    ctx.computer.modules.get(Startup).chip.memory[1] = 0xD0;
+}
+
+fn initMemoryChip(ctx: *MainContext) void {
+    restartMemoryChip(ctx);
+}
+
+fn restartMemoryChip(ctx: *MainContext) void {
+    ctx.random.interface().bytes(&ctx.computer.modules.get(Computer.RAM).chip.memory);
+}
+
+fn initHardDriveChip(ctx: *MainContext) void {
+    restartHardDriveChip(ctx);
+}
+
+fn restartHardDriveChip(_: *MainContext) void {
+    // const drive_memory = ctx.computer.modules.get(Computer.HardDrive).chip.memory[0..ctx.hard_drive.len];
+    // @memcpy(drive_memory, ctx.hard_drive);
+}
+
+fn initCartridgeChip(ctx: *MainContext) !void {
+    try restartCartridgeChip(ctx);
+}
+
+fn restartCartridgeChip(ctx: *MainContext) !void {
+    const drive_memory = ctx.computer.modules.get(Computer.CartridgeSlot).chip.memory[0..ctx.file.len];
+    @memcpy(drive_memory, ctx.file);
+    try BinaryPatch.deserialize(drive_memory, ctx.binary_patch);
+}
+
+fn initRandomizerChip(ctx: *MainContext) void {
+    restartRandomizerChip(ctx);
+}
+
+fn restartRandomizerChip(ctx: *MainContext) void {
+    ctx.computer.modules.get(Randomizer).chip.random = .init(ctx.random.interface().int(u64));
+}
+
+fn initPrinterChip(ctx: *MainContext) void {
+    restartPrinterChip(ctx);
+}
+
+fn restartPrinterChip(ctx: *MainContext) void {
+    ctx.computer.modules.get(Printer).chip = .{
+        .writer = ctx.printer_writer,
+    };
+}
+
+fn initGraphicsChip(ctx: *MainContext) !void {
+    const graphics = ctx.computer.modules.get(Computer.GPU);
+
+    graphics.chip.dma = .{ .computer = &ctx.computer };
+    graphics.chip.screen_buffer = try rl.loadRenderTexture(256, 256);
+    graphics.chip.background_layer_buffer = try rl.loadRenderTexture(256 * 2, 256 * 2);
+
+    restartGraphicsChip(ctx);
+}
+
+fn restartGraphicsChip(ctx: *MainContext) void {
+    const graphics = ctx.computer.modules.get(Computer.GPU);
+    ctx.random.interface().bytes(&graphics.chip.memory);
+
+    drawRandomPixels(ctx, graphics.chip.screen_buffer);
+    drawRandomPixels(ctx, graphics.chip.background_layer_buffer);
+
+    graphics.chip.memory[0x1520] = 0x20;
+    graphics.chip.memory[0x1521] = 0x09;
+    graphics.chip.memory[0x1522] = 0x20;
+    graphics.chip.memory[0x1523] = 0x19;
+}
+
+fn drawRandomPixels(ctx: *MainContext, render_texture: rl.RenderTexture2D) void {
+    render_texture.begin();
+    for (0..@intCast(render_texture.texture.width)) |x| {
+        for (0..@intCast(render_texture.texture.height)) |y| {
+            const r = ctx.random.interface().int(u8);
+            const color = rl.Color.init(r, r, r, 0xFF);
+            rl.drawPixel(@intCast(x), @intCast(y), color);
+        }
+    }
+    render_texture.end();
+}
+
+fn initAudio(ctx: *MainContext) !void {
+    const audio = ctx.computer.modules.get(Audio);
+    // rl.setAudioStreamBufferSizeDefault(Audio.audio_buffer_size);
+    audio.chip.audio_stream = try rl.loadAudioStream(Audio.sample_rate, 32, 1);
+    Audio.self_ = &audio.chip;
+    rl.setAudioStreamCallback(audio.chip.audio_stream, Audio.audioStreamCallback);
+    // rl.attachAudioStreamProcessor(audio.chip.audio_stream, Audio.audioStreamCallback);
+    ctx.random.interface().bytes(&audio.chip.noise_lut);
+    rl.playAudioStream(audio.chip.audio_stream);
+    rl.setMasterVolume(0.5);
+    restartAudio(ctx);
+}
+
+fn restartAudio(ctx: *MainContext) void {
+    const audio = ctx.computer.modules.get(Audio);
+    audio.chip.initMemory();
+}
+
+fn initDebugChip(ctx: *MainContext) void {
+    restartDebugChip(ctx);
+}
+
+fn restartDebugChip(ctx: *MainContext) void {
+    ctx.computer.modules.get(Debug).chip.cpu = &ctx.computer.cpu;
+}
 
 fn loop(ctx: *MainContext) !void {
     ctx.time.begin();
     defer ctx.time.end();
 
-    switch (try updateEmuControls(ctx)) {
+    switch (try ctx.ui_debug.update()) {
         .cont => {},
         .restart => {
             try restartComputer(ctx);
@@ -362,550 +305,20 @@ fn loop(ctx: *MainContext) !void {
             return;
         },
     }
-    updateMemoryRenderBuffers(ctx);
 
     rl.beginDrawing();
     rl.clearBackground(.black);
 
-    try drawCpu(ctx);
-    try drawController(ctx.computer, ctx.textures);
-    drawMemory(ctx);
-    try drawInstructions(ctx);
+    try ctx.ui_debug.draw();
 
-    const graphics = ctx.computer.modules.get(Graphics);
-    const screen_scale: f32 = if (ctx.is_fullscreen) 4 else 2;
+    const graphics = ctx.computer.modules.get(Computer.GPU);
+    const screen_scale: f32 = if (ctx.ui_debug.is_fullscreen) 4 else 2;
     const screen_dst = rl.Rectangle.init(UI.screen_size[0] - 256 * screen_scale, 0, 256 * screen_scale, 256 * screen_scale);
     graphics.chip.drawScreen(screen_dst);
 
     rl.drawFPS(5, UI.screen_size[1] - 20);
 
     rl.endDrawing();
-}
-
-const EmuEvent = enum { cont, restart };
-
-fn updateEmuControls(ctx: *MainContext) !EmuEvent {
-    if (rl.isKeyPressed(.r)) {
-        return .restart;
-    }
-
-    if (rl.isKeyPressed(.f11)) {
-        ctx.is_fullscreen = !ctx.is_fullscreen;
-    }
-
-    if (ctx.is_continuing) {
-        if (rl.isKeyPressed(.f5)) {
-            ctx.is_continuing = false;
-        } else {
-            for (0..Computer.clock_cycles_per_frame) |_| {
-                try ctx.computer.step();
-                const debug = &ctx.computer.modules.get(Debug).chip;
-                if (debug.is_stop) {
-                    ctx.is_continuing = false;
-                    debug.is_stop = false;
-                    break;
-                }
-            }
-            try ctx.computer.stepFrame();
-        }
-    } else {
-        if (rl.isKeyPressed(.f10)) {
-            try ctx.computer.step();
-        }
-        if (rl.isKeyPressed(.f9)) {
-            for (0..Computer.clock_cycles_per_frame) |_| {
-                try ctx.computer.step();
-                const debug = &ctx.computer.modules.get(Debug).chip;
-                if (debug.is_stop) {
-                    debug.is_stop = false;
-                    break;
-                }
-            }
-            try ctx.computer.stepFrame();
-        }
-        if (rl.isKeyPressed(.f5)) {
-            ctx.is_continuing = true;
-        }
-    }
-
-    return .cont;
-}
-
-fn updateMemoryRenderBuffers(ctx: *MainContext) void {
-    ctx.memory_render_buffer.begin();
-    drawMemoryAsCells(&ctx.computer, false);
-    ctx.memory_render_buffer.end();
-
-    ctx.sprite_map_render_buffer.begin();
-    drawSpriteMapAsCells(&ctx.computer, false);
-    ctx.sprite_map_render_buffer.end();
-
-    ctx.tile_map_render_buffer.begin();
-    drawTileMapAsCells(&ctx.computer, false);
-    ctx.tile_map_render_buffer.end();
-
-    ctx.tile_palette_map_render_buffer.begin();
-    drawTilePaletteMapAsCells(&ctx.computer, false);
-    ctx.tile_palette_map_render_buffer.end();
-}
-
-fn drawMemory(ctx: *MainContext) void {
-    ctx.memory_render_buffer.texture.drawPro(ctx.memory_src, ctx.memory_dst, .zero(), 0, .white);
-    ctx.sprite_map_render_buffer.texture.drawPro(ctx.sprite_map_src, ctx.sprite_map_dst, .zero(), 0, .white);
-    ctx.tile_map_render_buffer.texture.drawPro(ctx.tile_map_src, ctx.tile_map_dst, .zero(), 0, .white);
-    ctx.tile_palette_map_render_buffer.texture.drawPro(ctx.tile_palette_map_src, ctx.tile_palette_map_dst, .zero(), 0, .white);
-}
-
-fn drawCpu(ctx: *MainContext) !void {
-    const font_char_width: usize = (@intCast(rl.measureText("X", UI.font_size) + UI.text_spacing));
-    const col_width: usize = font_char_width * (4 + 2);
-    var buf: [32]u8 = undefined;
-
-    const registers_to_draw = .{ .a, .x, .y, .pc };
-    const flags_to_draw = .{ .carry, .zero_, .decimal_mode, .overflow, .negative };
-    const flag_tag_to_label = .{ "c", "z", "d", "o", "n" };
-
-    inline for (registers_to_draw, 0..) |field, i| {
-        const x = (i % 2) * col_width;
-        const y = @divFloor(i, 2) * UI.font_size;
-        const label = @tagName(field);
-        const data = @field(ctx.computer.cpu.registers, label);
-        const text = std.fmt.bufPrintZ(&buf, "{s}: {f}", .{ label, data }) catch "err";
-        rl.drawTextEx(ctx.font, text, .init(@floatFromInt(x), @floatFromInt(y)), UI.font_size, UI.text_spacing, .green);
-    }
-    inline for (flags_to_draw, 0..) |field, i| {
-        const width = font_char_width * 3;
-        const x = i * width + 10 * font_char_width;
-        const y = 4 * UI.font_size;
-        const tag = @tagName(field);
-        const label = flag_tag_to_label[i];
-        const data = @field(ctx.computer.cpu.flags, tag);
-        const text = std.fmt.bufPrintZ(&buf, "{s}:{}", .{ label, data }) catch "err";
-        rl.drawTextEx(ctx.font, text, .init(@floatFromInt(x), @floatFromInt(y)), UI.font_size, UI.text_spacing, .green);
-    }
-    {
-        const x = 0;
-        const y = 2 * UI.font_size;
-        const label = "ir";
-        const data = ctx.computer.cpu.instruction_register;
-        const decoded = brk: {
-            if (ctx.computer.cpu.instr_addr) |addr| {
-                const drive = ctx.computer.modules.getConst(Drive);
-                if (drive.isMapped(addr)) |rel_addr| {
-                    const decoded, _ = MOS6502.Instruction.decode(drive.chip.memory[rel_addr..]) catch |err| switch (err) {
-                        MOS6502.Instruction.DecodeError.InvalidOpcode => break :brk null,
-                        else => return err,
-                    };
-                    break :brk decoded;
-                }
-            }
-            break :brk null;
-        };
-        const text = std.fmt.bufPrintZ(&buf, "{s}: {f} {?f}", .{ label, data, decoded }) catch "err";
-        rl.drawTextEx(ctx.font, text, .init(@floatFromInt(x), @floatFromInt(y)), UI.font_size, UI.text_spacing, .green);
-    }
-    {
-        const x = 0;
-        const y = 3 * UI.font_size;
-        const label = "ab";
-        const data = ctx.computer.cpu.address_bus;
-        const text = std.fmt.bufPrintZ(&buf, "{s}: {f}", .{ label, data }) catch "err";
-        rl.drawTextEx(ctx.font, text, .init(@floatFromInt(x), @floatFromInt(y)), UI.font_size, UI.text_spacing, .green);
-    }
-    {
-        const x = col_width + font_char_width * 2;
-        const y = 3 * UI.font_size;
-        const label = "db";
-        const data = ctx.computer.cpu.data_bus;
-        const text = std.fmt.bufPrintZ(&buf, "{s}: {f}", .{ label, data }) catch "err";
-        rl.drawTextEx(ctx.font, text, .init(@floatFromInt(x), @floatFromInt(y)), UI.font_size, UI.text_spacing, .green);
-    }
-    {
-        const x = 0;
-        const y = 4 * UI.font_size;
-        const label = "rw";
-        const data = ctx.computer.cpu.read_write;
-        const text = std.fmt.bufPrintZ(&buf, "{s}: {t}", .{ label, data }) catch "err";
-        rl.drawTextEx(ctx.font, text, .init(@floatFromInt(x), @floatFromInt(y)), UI.font_size, UI.text_spacing, .green);
-    }
-}
-
-fn drawInstructions(ctx: *MainContext) !void {
-    var buf: [32]u8 = undefined;
-
-    const x_offset = UI.instructions_offset[0];
-    const y_offset = UI.instructions_offset[1];
-
-    const start_addr = ctx.computer.cpu.instr_addr orelse {
-        const pc = ctx.computer.cpu.registers.pc;
-        const x = 0 + x_offset;
-        const y = 0 + y_offset;
-        const text = std.fmt.bufPrintZ(&buf, "{x:04}: ????", .{pc.toInt()}) catch "err";
-        rl.drawTextEx(ctx.font, text, .init(@floatFromInt(x), @floatFromInt(y)), UI.font_size, UI.text_spacing, .green);
-        return;
-    };
-
-    const drive = ctx.computer.modules.getConst(Drive);
-    var addr_cursor = start_addr;
-    draw_instructions: for (0..UI.instructions_len) |i| {
-        const instr_addr = addr_cursor;
-        const x = 0 + x_offset;
-        const y = i * UI.font_size + y_offset;
-        const decoded = brk: {
-            if (drive.isMapped(addr_cursor)) |rel_addr| {
-                const decoded, const len = MOS6502.Instruction.decode(drive.chip.memory[rel_addr..]) catch |err| switch (err) {
-                    MOS6502.Instruction.DecodeError.InvalidOpcode => break :brk null,
-                    MOS6502.Instruction.DecodeError.EndOfSource => break :draw_instructions,
-                    else => return err,
-                };
-                addr_cursor += len;
-                break :brk decoded;
-            }
-            break :brk null;
-        };
-        const text = std.fmt.bufPrintZ(&buf, "{x:04}: {?f}", .{ instr_addr, decoded }) catch "err";
-        rl.drawTextEx(ctx.font, text, .init(@floatFromInt(x), @floatFromInt(y)), UI.font_size, UI.text_spacing, .green);
-    }
-}
-
-fn drawMemoryAsText(ctx: *MainContext) void {
-    const cols = UI.memory_text_cols;
-    const rows = UI.memory_text_rows;
-    const font_char_width = rl.measureText("X", UI.font_size);
-    const page_len = cols * rows;
-    const page = @divFloor(ctx.computer.cpu.registers.pc.toInt(), page_len);
-    const i_offset: usize = page * page_len;
-    draw_memory: for (0..cols) |col| {
-        for (0..rows) |row| {
-            const i = col + row * cols + i_offset;
-            const memory = ctx.computer.modules.getConst(Memory);
-            if (i >= memory.memory.len) break :draw_memory;
-            const byte = memory.memory[i];
-            var buf: [16]u8 = undefined;
-            const suffix = if (col % 2 == 1) " " else "";
-            const text = std.fmt.bufPrintZ(&buf, "{x:02}{s}", .{ byte, suffix }) catch "err";
-            const x_offset = if (col % 2 == 0) 0 else font_char_width * 2;
-            const x: i32 = @as(i32, @intCast(@divFloor(col, 2))) * (font_char_width * 5) + x_offset + UI.memory_offset[0];
-            const y: i32 = @as(i32, @intCast(row)) * (UI.font_size + 3) + UI.memory_offset[1];
-            if (ctx.computer.cpu.registers.pc.toInt() == i) {
-                rl.drawRectangle(x - 2, y - 2, font_char_width * 2 + 2, UI.font_size + 2, .green);
-            }
-            const color: rl.Color = if (ctx.computer.cpu.registers.pc.toInt() == i) .black else .green;
-            rl.drawTextEx(ctx.font, text, .init(@floatFromInt(x), @floatFromInt(y)), UI.font_size, UI.text_spacing, color);
-        }
-    }
-}
-
-fn drawMemoryAsCells(computer: *Computer, draw_background: bool) void {
-    const memory = computer.modules.get(Memory);
-    const write_events = if (draw_background) brk: {
-        var copy: @TypeOf(memory.write_events) = .full;
-        break :brk &copy;
-    } else &memory.write_events;
-
-    drawMemoryCells(&memory.chip.memory, write_events, .{
-        .cols = UI.memory_cell_cols,
-        .color_override = if (draw_background) .gray else null,
-        // .paged = .{
-        //     .active_cell = computer.cpu.registers.pc.toInt(),
-        //     .rows_per_page = UI.memory_cell_rows,
-        // },
-    });
-}
-
-fn drawTileMapAsCells(computer: *Computer, draw_background: bool) void {
-    const graphics = computer.modules.get(Graphics);
-    const chip_write_events = &graphics.chip.getModule(.tilePatternMap).write_events;
-    var write_events_copy: @TypeOf(chip_write_events.*) = .full;
-    const write_events = if (draw_background) &write_events_copy else chip_write_events;
-
-    drawMemoryCells(graphics.chip.tileMap(), write_events, .{
-        .cols = UI.tile_map_cell_cols,
-        .color_override = if (draw_background) .gray else null,
-    });
-}
-
-fn drawTilePaletteMapAsCells(computer: *Computer, draw_background: bool) void {
-    const graphics = computer.modules.get(Graphics);
-    const chip_write_events = &graphics.chip.getModule(.tilePaletteMap).write_events;
-    var write_events_copy: @TypeOf(chip_write_events.*) = .full;
-    const write_events: @TypeOf(chip_write_events) = if (draw_background) &write_events_copy else chip_write_events;
-
-    drawMemoryCells(graphics.chip.tilePaletteMap(), write_events, .{
-        .cols = UI.tile_palette_map_cell_cols,
-        .color_override = if (draw_background) .gray else null,
-    });
-}
-
-fn drawTilePalettesAsCells(computer: *Computer, draw_background: bool) void {
-    const graphics = computer.modules.get(Graphics);
-    const chip_write_events = &graphics.chip.getModule(.tilePalettes).write_events;
-    var write_events_copy: @TypeOf(chip_write_events.*) = .full;
-    const write_events = if (draw_background) &write_events_copy else chip_write_events;
-
-    drawMemoryCells(graphics.chip.tilePalettes(), write_events, .{
-        .cols = UI.memory_cell_cols,
-        .color_override = if (draw_background) .gray else null,
-    });
-}
-
-fn drawSpritePalettesAsCells(computer: *Computer, draw_background: bool) void {
-    const graphics = computer.modules.get(Graphics);
-    const chip_write_events = &graphics.chip.getModule(.spritePalettes).write_events;
-    var write_events_copy: @TypeOf(chip_write_events.*) = .full;
-    const write_events = if (draw_background) &write_events_copy else chip_write_events;
-
-    drawMemoryCells(graphics.chip.spritePalettes(), write_events, .{
-        .cols = UI.memory_cell_cols,
-        .color_override = if (draw_background) .gray else null,
-    });
-}
-
-fn drawTileDataAsCells(computer: *Computer, draw_background: bool) void {
-    const graphics = computer.modules.get(Graphics);
-    const chip_write_events = &graphics.chip.getModule(.tileData).write_events;
-    var write_events_copy: @TypeOf(chip_write_events.*) = .full;
-    const write_events = if (draw_background) &write_events_copy else chip_write_events;
-
-    drawMemoryCells(graphics.chip.tileData(), write_events, .{
-        .cols = UI.tile_data_cell_cols,
-        .color_override = if (draw_background) .gray else null,
-    });
-}
-
-fn drawSpriteDataAsCells(computer: *Computer, draw_background: bool) void {
-    const graphics = computer.modules.get(Graphics);
-    const chip_write_events = &graphics.chip.getModule(.spriteData).write_events;
-    var write_events_copy: @TypeOf(chip_write_events.*) = .full;
-    const write_events = if (draw_background) &write_events_copy else chip_write_events;
-
-    drawMemoryCells(graphics.chip.spriteData(), write_events, .{
-        .cols = UI.memory_cell_cols,
-        .color_override = if (draw_background) .gray else null,
-    });
-}
-
-fn drawSpriteMapAsCells(computer: *Computer, draw_background: bool) void {
-    const graphics = computer.modules.get(Graphics);
-    const chip_write_events = &graphics.chip.getModule(.spriteMap).write_events;
-    var write_events_copy: @TypeOf(chip_write_events.*) = .full;
-    const write_events = if (draw_background) &write_events_copy else chip_write_events;
-
-    drawMemoryCells(graphics.chip.spriteMap(), write_events, .{
-        .cols = UI.sprite_map_cell_cols,
-        .color_override = if (draw_background) .gray else null,
-    });
-}
-
-const DrawMemoryCellsOptions = struct {
-    cols: usize,
-    color_override: ?rl.Color = null,
-    debug: bool = false,
-    paged: ?struct {
-        active_cell: usize,
-        rows_per_page: usize,
-    } = null,
-
-    fn pageInfo(self: @This(), len: usize) struct {
-        rows: usize,
-        i_offset: usize,
-        active_cell: ?usize = null,
-        page_len: ?usize = null,
-    } {
-        if (self.paged) |paged| {
-            const page_len = self.cols * paged.rows_per_page;
-            const page = @divFloor(paged.active_cell, page_len);
-
-            return .{
-                .rows = paged.rows_per_page,
-                .i_offset = page * page_len,
-                .page_len = page_len,
-                .active_cell = paged.active_cell,
-            };
-        }
-
-        return .{
-            .rows = @divExact(len, self.cols),
-            .i_offset = 0,
-        };
-    }
-};
-
-fn drawMemoryCells(memory: []const u8, write_events: anytype, options: DrawMemoryCellsOptions) void {
-    const cols = options.cols;
-    const cell_size = @Vector(2, u4){ 2, 2 };
-    const page_info = options.pageInfo(memory.len);
-    const one = @Vector(2, u1){ 1, 1 };
-
-    var it = write_events.iterator(.{});
-    while (it.next()) |i| {
-        if (page_info.page_len) |page_len| {
-            if (i < page_info.i_offset or i >= page_info.i_offset + page_len) {
-                continue;
-            }
-        }
-
-        const col = i % cols;
-        const row = @divFloor(i, cols);
-
-        if (i >= memory.len) break;
-
-        const byte = memory[i];
-        const col_row = @Vector(2, i32){ @intCast(col), @intCast(row) };
-        const pos = col_row * (cell_size + one) + one;
-        if (page_info.active_cell) |ac| if (ac == i) {
-            rl.drawRectangle(pos[0] - 1, pos[1] - 1, cell_size[0] + 2, cell_size[1] + 2, .light_gray);
-        };
-        if (options.color_override) |color_override| {
-            rl.drawRectangle(pos[0], pos[1], cell_size[0], cell_size[1], color_override);
-        } else {
-            drawMemoryCell(byte, pos[0], pos[1]);
-        }
-    }
-
-    write_events.* = .empty;
-}
-
-fn drawMemoryCell(byte: u8, offset_x: i32, offset_y: i32) void {
-    const color_tl, const color_tr, const color_bl, const color_br = byteToColor(byte);
-    rl.drawPixel(offset_x, offset_y, color_tl);
-    rl.drawPixel(offset_x + 1, offset_y, color_tr);
-    rl.drawPixel(offset_x, offset_y + 1, color_bl);
-    rl.drawPixel(offset_x + 1, offset_y + 1, color_br);
-}
-
-fn byteToColor(byte: u8) struct { rl.Color, rl.Color, rl.Color, rl.Color } {
-    const color_table = [4]rl.Color{ .blue, .green, .yellow, .red };
-
-    return .{
-        color_table[@as(u2, @truncate(byte >> 6))],
-        color_table[@as(u2, @truncate(byte >> 4))],
-        color_table[@as(u2, @truncate(byte >> 2))],
-        color_table[@as(u2, @truncate(byte))],
-    };
-}
-
-const Textures = struct {
-    directional_button: rl.RenderTexture,
-    directional_button_src: rl.Rectangle,
-    button: rl.RenderTexture,
-    button_src: rl.Rectangle,
-};
-
-fn drawController(computer: Computer, textures: Textures) !void {
-    var offset_x: f32 = 300;
-    const offset_y = 20;
-    const scale = 3;
-    const step = 16;
-    const buttons = Byte.fromInt(try computer.modules.getConst(Controller).chip.read(0));
-
-    {
-        const x = 0;
-        const y = 0;
-        const data = buttons.b0;
-        const src = textures.directional_button_src;
-        var dst = src;
-        dst.x = x + offset_x;
-        dst.y = y + offset_y;
-        dst.width *= scale;
-        dst.height *= -scale;
-        const color: rl.Color = if (data == 1) .yellow else .gray;
-        textures.directional_button.texture.drawPro(textures.directional_button_src, dst, .zero(), 0, color);
-    }
-    {
-        const x = -step;
-        const y = step;
-        const data = buttons.b1;
-        const src = textures.directional_button_src;
-        var dst = src;
-        dst.width *= scale;
-        dst.height *= -scale;
-        dst.x = x + offset_x;
-        dst.y = y + offset_y + dst.height;
-        const color: rl.Color = if (data == 1) .yellow else .gray;
-        textures.directional_button.texture.drawPro(textures.directional_button_src, dst, .zero(), 270, color);
-    }
-    {
-        const x = 0;
-        const y = step * 2;
-        const data = buttons.b2;
-        const src = textures.directional_button_src;
-        var dst = src;
-        dst.width *= scale;
-        dst.height *= -scale;
-        dst.x = x + offset_x + dst.width;
-        dst.y = y + offset_y + dst.height;
-        const color: rl.Color = if (data == 1) .yellow else .gray;
-        textures.directional_button.texture.drawPro(textures.directional_button_src, dst, .zero(), 180, color);
-    }
-    {
-        const x = step;
-        const y = step;
-        const data = buttons.b3;
-        const src = textures.directional_button_src;
-        var dst = src;
-        dst.width *= scale;
-        dst.height *= -scale;
-        dst.x = x + offset_x + dst.width;
-        dst.y = y + offset_y;
-        const color: rl.Color = if (data == 1) .yellow else .gray;
-        textures.directional_button.texture.drawPro(textures.directional_button_src, dst, .zero(), 90, color);
-    }
-
-    offset_x += step * 4;
-
-    {
-        const x = 0;
-        const y = 0;
-        const data = buttons.b4;
-        const src = textures.button_src;
-        var dst = src;
-        dst.x = x + offset_x;
-        dst.y = y + offset_y;
-        dst.width *= scale;
-        dst.height *= -scale;
-        const color: rl.Color = if (data == 1) .yellow else .gray;
-        textures.button.texture.drawPro(textures.button_src, dst, .zero(), 0, color);
-    }
-    {
-        const x = -step;
-        const y = step;
-        const data = buttons.b5;
-        const src = textures.button_src;
-        var dst = src;
-        dst.width *= scale;
-        dst.height *= -scale;
-        dst.x = x + offset_x;
-        dst.y = y + offset_y + dst.height;
-        const color: rl.Color = if (data == 1) .yellow else .gray;
-        textures.button.texture.drawPro(textures.button_src, dst, .zero(), 270, color);
-    }
-    {
-        const x = 0;
-        const y = step * 2;
-        const data = buttons.b6;
-        const src = textures.button_src;
-        var dst = src;
-        dst.width *= scale;
-        dst.height *= -scale;
-        dst.x = x + offset_x + dst.width;
-        dst.y = y + offset_y + dst.height;
-        const color: rl.Color = if (data == 1) .yellow else .gray;
-        textures.button.texture.drawPro(textures.button_src, dst, .zero(), 180, color);
-    }
-    {
-        const x = step;
-        const y = step;
-        const data = buttons.b7;
-        const src = textures.button_src;
-        var dst = src;
-        dst.width *= scale;
-        dst.height *= -scale;
-        dst.x = x + offset_x + dst.width;
-        dst.y = y + offset_y;
-        const color: rl.Color = if (data == 1) .yellow else .gray;
-        textures.button.texture.drawPro(textures.button_src, dst, .zero(), 90, color);
-    }
 }
 
 test {

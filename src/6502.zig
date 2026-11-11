@@ -182,7 +182,7 @@ pub const MOS6502 = struct {
     fn executeWithAddressingMode(self: *@This()) Error!ExecuteEvent {
         const instr_type = try self.getInstrType();
         {
-            if ((try self.getInstrType()).operation_type == .undecided) {
+            if (instr_type.operation_type == .undecided) {
                 @panic(std.fmt.allocPrint(std.heap.page_allocator, "operation type of {s} is undecided", .{instr_type.mnemonic}) catch unreachable);
             }
         }
@@ -1296,6 +1296,10 @@ pub const MOS6502 = struct {
         is_set,
         unimplemented,
     };
+
+    pub fn formatTerminal(self: *@This()) CpuFormatter {
+        return formatCpu(self, .terminal);
+    }
 };
 
 // INSTRUCTION SET
@@ -5896,6 +5900,21 @@ test "instruction operation LDA" {
     zero_case.expected.flags.negative = 1;
     zero_case.expected.data_bus = .fromInt(0xab);
     try zero_case.testExpected();
+
+    var absolute_indexed_case = try CPUTester.init(.LDA(.indexed_absolute_x, .fromInt(0xd355)), &.{});
+    defer absolute_indexed_case.deinit();
+    try absolute_indexed_case.expectStartSequence();
+    absolute_indexed_case.fixture.registers.x = .fromInt(0x03);
+    try absolute_indexed_case.expectRead(0, absolute_indexed_case.program);
+    try absolute_indexed_case.expectRead(1, absolute_indexed_case.program);
+    try absolute_indexed_case.expectRead(2, absolute_indexed_case.program);
+    try absolute_indexed_case.expectRead(0xd355 + 0x03, null);
+    absolute_indexed_case.fixture.data_bus = .fromInt(0x7b);
+    try absolute_indexed_case.expectExecute();
+    absolute_indexed_case.expected.registers.x = .fromInt(0x03);
+    absolute_indexed_case.expected.registers.a = .fromInt(0x7b);
+    absolute_indexed_case.expected.data_bus = .fromInt(0x7b);
+    try absolute_indexed_case.testExpected();
 }
 
 test "instruction operation ADC" {

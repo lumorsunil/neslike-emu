@@ -1,0 +1,70 @@
+    processor 6502
+
+)§
+utils = await import("./utils.js")
+controls = await import("./controls.js")
+music = await import("./music.js")
+graphics = await import("./graphics.js")
+objects = await import("./objects.js")
+logic = await import("./logic.js")
+font = await import("./font.js")
+)§
+
+    include "neslike.inc"
+
+    seg.u variables
+ram:
+    org $0000
+temp: ds 3
+temp2: ds 3
+temp3: ds 3
+)§ emit(controls.readWriteData()) )§
+)§ emit(logic.readWriteData()) )§
+
+    org $0200
+)§ emit(music.readWriteData()) )§
+
+    seg code
+    org $D000
+    jmp main
+
+    ; seg rwm
+)§ emit(logic.persistentData()) )§
+
+    ; seg code
+main:
+
+)§ emit(graphics.init()) )§
+)§ emit(objects.init()) )§
+)§ emit(controls.init()) )§
+)§ emit(music.init()) )§
+)§ emit(logic.init()) )§
+
+init_done:
+
+    sta VSYNC
+)§ emit(graphics.enable()) )§
+    sta VSYNC
+
+frame:
+
+)§ emit(controls.instructions()) )§
+)§ emit(logic.instructions()) )§
+)§ emit(music.instructions()) )§
+
+end:
+    sta VSYNC
+    jmp frame
+
+subroutines:
+)§ emit(objects.subroutines()) )§
+)§ emit(graphics.subroutines()) )§
+)§ emit(logic.subroutines()) )§
+)§ emit(music.subroutines()) )§
+
+    ; seg rom
+    ; org $E100
+
+)§ emit(music.readOnlyData()) )§
+)§ emit(graphics.readOnlyData()) )§
+)§ emit(logic.readOnlyData()) )§

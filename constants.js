@@ -1,5 +1,5 @@
-export const TPATM = 0x400;
-export const TPALM = 0x800;
+export const TPATM = 0x0400;
+export const TPALM = 0x1400;
 export const PLAYER_BODY_SIZE_INIT = 2;
 export const HI_SCORE_LEN = 3;
 export const SCORE_PER_APPLE = 0x10;

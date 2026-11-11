@@ -31,6 +31,13 @@ pub const SevenBits = packed struct(u7) {
     }
 };
 
+pub const Nibble = packed struct(u4) {
+    b0: u1 = 0,
+    b1: u1 = 0,
+    b2: u1 = 0,
+    b3: u1 = 0,
+};
+
 pub const Byte = packed struct(u8) {
     b0: u1 = 0,
     b1: u1 = 0,
